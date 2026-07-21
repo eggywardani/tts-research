@@ -53,6 +53,13 @@ export interface HistoryParams {
   mode?: 'clone' | 'design';
 }
 
+export interface HistoryChunk {
+  index: number;
+  text: string;
+  status: 'completed' | 'failed' | 'silent';
+  duration_seconds?: number | null;
+}
+
 export interface HistoryItem {
   id: string;
   speaker_id: string | null;
@@ -63,6 +70,7 @@ export interface HistoryItem {
   sample_rate: string;
   rvc: boolean;
   duration_seconds: number | null;
+  chunks: HistoryChunk[];
   url: string | null;
   created_at: string;
 }

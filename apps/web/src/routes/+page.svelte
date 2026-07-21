@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import {
     fetchHealth,
     fetchSpeakers,
@@ -175,6 +176,8 @@
         } else if (e.type === 'completed') {
           jobStatus = 'completed';
           savedUrl = e.url;
+          // Jump straight to the result detail, like audio-processor-llm.
+          goto(`/history?focus=${e.history_id}`);
         } else if (e.type === 'cancelled') {
           jobStatus = 'cancelled';
           error = 'Cancelled.';
