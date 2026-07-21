@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { goto } from '$app/navigation';
   import { fetchJobs, cancelJob, type Job } from '$lib/api';
 
   let jobs = $state<Job[]>([]);
@@ -35,6 +36,14 @@
     }
   }
 
+  // A completed job's id is its history id — click to open the result detail.
+  function openable(j: Job): boolean {
+    return j.status === 'completed' && !!(j.history_id ?? j.id);
+  }
+  function open(j: Job) {
+    if (openable(j)) goto(`/history?focus=${j.history_id ?? j.id}`);
+  }
+
   function when(iso: string): string {
     try {
       return new Date(iso).toLocaleString();
@@ -57,21 +66,26 @@
   {:else}
     <ul class="list">
       {#each jobs as j (j.id)}
-        <li>
+        <li
+          class:clickable={openable(j)}
+          role={openable(j) ? 'button' : undefined}
+          tabindex={openable(j) ? 0 : undefined}
+          onclick={() => open(j)}
+          onkeydown={(e) => { if (openable(j) && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(j); } }}
+        >
           <div class="row1">
             <span class="badge {j.status}">{j.status}{#if j.status === 'queued'} · #{j.position}{/if}</span>
             <span class="text">{j.text || '(no text)'}</span>
             {#if ACTIVE.has(j.status)}
-              <button class="cancel" onclick={() => cancel(j)}>Cancel</button>
+              <button class="cancel" onclick={(e) => { e.stopPropagation(); cancel(j); }}>Cancel</button>
+            {:else if openable(j)}
+              <span class="view">View →</span>
             {/if}
           </div>
           <div class="row2">
             <span class="meta">{when(j.created_at)} · {j.engine}</span>
             {#if j.status === 'processing' && j.total_chunks > 0}
               <span class="prog"><span class="bar"><span class="fill" style="width:{(j.completed_chunks / j.total_chunks) * 100}%"></span></span>{j.completed_chunks}/{j.total_chunks}</span>
-            {/if}
-            {#if j.status === 'completed' && j.url}
-              <audio controls src={j.url}></audio>
             {/if}
             {#if j.status === 'failed' && j.error}<span class="err">{j.error}</span>{/if}
           </div>
@@ -89,6 +103,9 @@
   .muted { color: #8a93a6; }
   .list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
   .list li { background: #fff; border: 1px solid #e6eaf1; border-radius: 11px; padding: 0.8rem 1rem; box-shadow: 0 1px 2px rgba(16,24,40,0.03); }
+  .list li.clickable { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+  .list li.clickable:hover { border-color: #cddcff; box-shadow: 0 2px 10px rgba(16,24,40,0.06); }
+  .view { font-size: 0.78rem; color: #2563eb; font-weight: 500; white-space: nowrap; }
   .row1 { display: flex; align-items: center; gap: 0.75rem; }
   .text { flex: 1; font-size: 0.9rem; color: #1a1f36; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row2 { display: flex; align-items: center; gap: 0.9rem; margin-top: 0.5rem; }
@@ -102,7 +119,6 @@
   .prog { display: flex; align-items: center; gap: 0.5rem; font-size: 0.74rem; color: #6b7280; }
   .prog .bar { width: 120px; height: 6px; background: #e6eaf1; border-radius: 999px; overflow: hidden; }
   .prog .fill { display: block; height: 100%; background: #2563eb; }
-  .row2 audio { height: 32px; }
   .err { font-size: 0.75rem; color: #b91c1c; }
   .cancel { background: #fff; border: 1px solid #fecaca; color: #dc2626; border-radius: 8px; padding: 0.35rem 0.7rem; cursor: pointer; font-size: 0.78rem; }
   .cancel:hover { background: #fef2f2; }
