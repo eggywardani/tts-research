@@ -1,0 +1,13 @@
+{
+  "name": "tts-experience",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal TTS-clone playground to experience the OmniVoice + RVC engine before applying it to audio-processor-llm",
+  "workspaces": ["apps/api", "apps/web"],
+  "scripts": {
+    "dev": "bun run --filter '*' dev",
+    "dev:api": "bun run --filter '@tts-exp/api' dev",
+    "dev:web": "bun run --filter '@tts-exp/web' dev",
+    "tts": "cd apps/tts && python main.py"
+  }
+}

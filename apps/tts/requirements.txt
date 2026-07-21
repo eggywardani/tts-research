@@ -1,0 +1,14 @@
+# Core service
+fastapi>=0.115.0
+uvicorn>=0.30.0
+python-multipart>=0.0.9
+soundfile>=0.12.0
+numpy
+
+# OmniVoice engine (needs a CUDA GPU + torch)
+# torch is intentionally left to be installed for your CUDA version, e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+omnivoice
+
+# RVC (only needed when you replace the stub with a real converter)
+# rvc-python

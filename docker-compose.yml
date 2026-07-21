@@ -1,0 +1,54 @@
+# Convenience compose. The tts service needs an NVIDIA GPU (nvidia-container-toolkit).
+# On a machine without a GPU, run only `api` and `web` and point TTS_URL at a
+# remote GPU host instead.
+#
+# Auth/token values are read from a root .env file (copy .env.example). Both
+# gates are off when the vars are blank.
+services:
+  tts:
+    build: ./apps/tts
+    ports: ['9000:9000']
+    environment:
+      - PORT=9000
+      - RVC_MODELS_DIR=/app/models/rvc
+    volumes:
+      - ./apps/tts/models:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  api:
+    build: ./apps/api
+    ports: ['9001:9001']
+    environment:
+      - PORT=9001
+      - TTS_URL=http://tts:9000
+      - API_TOKEN=${API_TOKEN:-}
+    depends_on: [tts]
+
+  web:
+    build: ./apps/web
+    ports: ['5173:5173']
+    environment:
+      - PORT=5173
+      # Reach the API over the compose network (web proxies /api + /health to it).
+      - API_URL=http://api:9001
+      - AUTH_PASSWORD=${AUTH_PASSWORD:-}
+      - AUTH_SECRET=${AUTH_SECRET:-}
+      - API_TOKEN=${API_TOKEN:-}
+    depends_on: [api]
+
+  # Cloudflare Tunnel — exposes the stack publicly with no inbound port (required
+  # on a GPU box behind NAT). Point one public hostname at http://web:5173 in the
+  # Cloudflare Zero Trust dashboard; the web then proxies /api + /health internally,
+  # so the API + TTS stay private. Omit this service to run local-only.
+  tunnel:
+    build: ./apps/tunnel
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
+    depends_on: [web]
+    restart: unless-stopped
