@@ -342,10 +342,15 @@
               </div>
 
               <label class="toggle"><input type="checkbox" bind:checked={eUseRvc} /> RVC post-processing</label>
+              <p class="rvc-note">Optional voice-changer: converts the result to a pre-trained RVC model (.pth). Not needed for normal cloning — leave off unless you have a trained model.</p>
               {#if eUseRvc}
-                <div class="rvc-grid">
-                  <label class="field"><span>rvc model (.pth)</span><input bind:value={eRvcModel} placeholder="my_voice.pth" /></label>
-                  <label class="field"><span>rvc pitch</span><input type="number" step="1" bind:value={eRvcPitch} /></label>
+                <label class="field"><span>rvc model (.pth)</span><input bind:value={eRvcModel} placeholder="my_voice.pth" /></label>
+                <div class="param">
+                  <div class="param-head">
+                    <span>rvc pitch <em>semitones</em></span>
+                    <input class="num" type="number" step="1" min="-12" max="12" bind:value={eRvcPitch} />
+                  </div>
+                  <input class="slider" type="range" min="-12" max="12" step="1" value={eRvcPitch} oninput={(e) => (eRvcPitch = +e.currentTarget.value)} />
                 </div>
               {/if}
 
@@ -455,7 +460,7 @@
   .slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: #2563eb; border: 2px solid #fff; border-radius: 50%; cursor: pointer; box-shadow: 0 1px 3px rgba(16,24,40,0.25); }
   .slider::-moz-range-thumb { width: 18px; height: 18px; background: #2563eb; border: 2px solid #fff; border-radius: 50%; cursor: pointer; box-shadow: 0 1px 3px rgba(16,24,40,0.25); }
   .toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569; }
-  .rvc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.75rem; }
+  .rvc-note { margin: 0.4rem 0 0; font-size: 0.74rem; line-height: 1.4; color: #8a93a6; }
   .editor-actions { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 1rem; }
   .cancel { background: #fff; border: 1px solid #e2e8f0; color: #475569; border-radius: 9px; padding: 0.5rem 1rem; cursor: pointer; font-size: 0.85rem; }
   .save { background: #2563eb; border: none; color: #fff; border-radius: 9px; padding: 0.5rem 1.1rem; cursor: pointer; font-size: 0.85rem; font-weight: 600; }
