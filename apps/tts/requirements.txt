@@ -6,8 +6,9 @@ soundfile>=0.12.0
 numpy
 
 # OmniVoice engine (needs a CUDA GPU + torch)
-# torch is intentionally left to be installed for your CUDA version, e.g.:
-#   pip install torch --index-url https://download.pytorch.org/whl/cu128   # Blackwell/50xx
+# torch + torchaudio are installed separately for your CUDA version (see Dockerfile).
+# They MUST match — install both from the same index, e.g.:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128  # Blackwell/50xx
 omnivoice
 
 # RVC (only needed when you replace the stub with a real converter)

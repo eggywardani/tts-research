@@ -9,11 +9,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Torch first, pinned to the CUDA 12.8 wheel index (Blackwell/sm_120 support).
-RUN pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
+# Torch + torchaudio together from the CUDA 12.8 wheel index (Blackwell/sm_120).
+# They MUST come from the same index — installing torchaudio separately (e.g. as
+# an omnivoice dependency from PyPI) pulls an ABI-mismatched build and fails with
+# "Could not load this library: .../_torchaudio.abi3.so".
+RUN pip3 install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cu128
 
+# Install omnivoice etc. WITHOUT letting pip swap out the CUDA torch/torchaudio
+# above — the constraints file pins them to whatever we just installed.
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip3 freeze | grep -E '^(torch|torchaudio)==' > /tmp/torch-constraints.txt && \
+    pip3 install --no-cache-dir -c /tmp/torch-constraints.txt -r requirements.txt
 
 COPY . .
 
