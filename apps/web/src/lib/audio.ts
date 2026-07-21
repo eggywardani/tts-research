@@ -90,9 +90,9 @@ export function analyzeAudio(buffer: AudioBuffer): AudioAnalysis {
   const optimization: AudioAnalysis['optimization'] = duration >= 8 && duration <= 25 ? 'Optimal' : 'Suboptimal';
 
   let message: string;
-  if (score >= 85) message = 'Kualitas audio sangat baik untuk kloning suara!';
-  else if (score >= 60) message = 'Kualitas audio cukup baik. Bersihkan noise untuk hasil lebih baik.';
-  else message = 'Noise cukup tinggi — pakai rekaman yang lebih bersih untuk hasil terbaik.';
+  if (score >= 85) message = 'Great audio quality for voice cloning!';
+  else if (score >= 60) message = 'Decent audio quality. Reduce noise for a better result.';
+  else message = 'Noise is fairly high — use a cleaner recording for the best result.';
 
   return { duration, sampleRate: sr, snrDb, noiseLabel, score, optimization, message };
 }
