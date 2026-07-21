@@ -71,7 +71,8 @@ export interface HistoryItem {
   rvc: boolean;
   duration_seconds: number | null;
   chunks: HistoryChunk[];
-  url: string | null;
+  has_audio: boolean;
+  url: string | null; // null in the list; populated by fetchHistoryItem on demand
   created_at: string;
 }
 
@@ -277,6 +278,13 @@ export async function deleteSpeaker(id: string): Promise<void> {
 
 export async function fetchHistory(limit = 50): Promise<HistoryItem[]> {
   const res = await fetch(`/api/history?limit=${limit}`);
+  if (!res.ok) await fail(res);
+  return res.json();
+}
+
+/** Fetch a single record WITH its presigned audio URL (signed on demand). */
+export async function fetchHistoryItem(id: string): Promise<HistoryItem> {
+  const res = await fetch(`/api/history/${id}`);
   if (!res.ok) await fail(res);
   return res.json();
 }

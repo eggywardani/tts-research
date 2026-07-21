@@ -1,26 +1,48 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { page } from '$app/stores';
-  import { fetchHistory, deleteHistory, clearHistory, type HistoryItem } from '$lib/api';
+  import { fetchHistory, fetchHistoryItem, deleteHistory, clearHistory, type HistoryItem } from '$lib/api';
 
   let items = $state<HistoryItem[]>([]);
   let loading = $state(true);
   let error = $state('');
   let expanded = $state<Set<string>>(new Set());
   let focusId = $state<string | null>(null);
+  // Presigned URLs fetched lazily when a detail is opened (avoids S3 hits on list load).
+  let audioUrls = $state<Record<string, string>>({});
+  let loadingUrl = $state<Set<string>>(new Set());
 
   onMount(async () => {
     await load();
     // When arriving from the studio (?focus=<id>), open + scroll to that result.
     const focus = $page.url.searchParams.get('focus');
-    if (focus && items.some((i) => i.id === focus)) {
-      expanded = new Set([focus]);
-      focusId = focus;
+    const it = focus ? items.find((i) => i.id === focus) : undefined;
+    if (it) {
+      expanded = new Set([it.id]);
+      ensureUrl(it);
+      focusId = it.id;
       await tick();
-      document.getElementById(`h-${focus}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.getElementById(`h-${it.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       setTimeout(() => (focusId = null), 2500); // fade the highlight
     }
   });
+
+  // Load the presigned URL for a single record on demand (only when its detail
+  // is opened). No-op if there's no archived audio or we already have it.
+  async function ensureUrl(it: HistoryItem) {
+    if (!it.has_audio || audioUrls[it.id] || loadingUrl.has(it.id)) return;
+    loadingUrl = new Set(loadingUrl).add(it.id);
+    try {
+      const full = await fetchHistoryItem(it.id);
+      if (full.url) audioUrls = { ...audioUrls, [it.id]: full.url };
+    } catch {
+      /* leave it unloaded; the card shows a retry hint */
+    } finally {
+      const next = new Set(loadingUrl);
+      next.delete(it.id);
+      loadingUrl = next;
+    }
+  }
 
   async function load() {
     loading = true;
@@ -53,9 +75,14 @@
     }
   }
 
-  function toggle(id: string) {
+  function toggle(it: HistoryItem) {
     const next = new Set(expanded);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(it.id)) {
+      next.delete(it.id);
+    } else {
+      next.add(it.id);
+      ensureUrl(it); // lazy-load audio only when opening the detail
+    }
     expanded = next;
   }
 
@@ -73,7 +100,7 @@
   <div class="head">
     <div>
       <h1>Audio history</h1>
-      <p class="sub">Every generation is archived here. Click a card to play it and inspect its chunks.</p>
+      <p class="sub">Every generation is archived here. Open a result to load its audio + inspect its chunks (audio is fetched only when you open it).</p>
     </div>
     {#if items.length}<button class="clear" onclick={clearAll}>Clear all</button>{/if}
   </div>
@@ -96,17 +123,25 @@
               <span class="tag">{it.speaker_name ? it.speaker_name : 'voice design'}</span>
               {#if it.duration_seconds}<span class="tag">{it.duration_seconds.toFixed(1)}s</span>{/if}
               <span class="tag">{it.chunks?.length ?? 0} chunks</span>
+              {#if !it.has_audio}<span class="tag muted-tag">no audio</span>{/if}
             </div>
-
-            {#if it.url}
-              <audio controls src={it.url}></audio>
-            {:else}
-              <div class="noaudio">not archived (S3 off)</div>
-            {/if}
           </div>
 
           {#if expanded.has(it.id)}
             <div class="detail">
+              {#if it.has_audio}
+                {#if audioUrls[it.id]}
+                  <!-- preload="none": nothing fetched from S3 until the user hits play -->
+                  <audio class="player" controls preload="none" src={audioUrls[it.id]}></audio>
+                {:else if loadingUrl.has(it.id)}
+                  <div class="noaudio">loading audio…</div>
+                {:else}
+                  <button class="link" onclick={() => ensureUrl(it)}>Load audio</button>
+                {/if}
+              {:else}
+                <div class="noaudio">not archived (S3 off)</div>
+              {/if}
+
               <div class="config">
                 {#if it.params?.temperature != null}<div class="ci"><span>temperature</span><b>{it.params.temperature}</b></div>{/if}
                 {#if it.params?.top_p != null}<div class="ci"><span>top_p</span><b>{it.params.top_p}</b></div>{/if}
@@ -136,7 +171,7 @@
           <div class="footer">
             <span class="date">{when(it.created_at)}</span>
             <div class="actions">
-              <button class="link" onclick={() => toggle(it.id)}>
+              <button class="link" onclick={() => toggle(it)}>
                 {expanded.has(it.id) ? 'Hide' : 'Details'}
               </button>
               <button class="del" onclick={() => remove(it)} aria-label="delete">✕</button>
@@ -170,10 +205,11 @@
   .tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.75rem; }
   .tag { font-size: 0.7rem; color: #4f566b; background: #eef1f6; border: 1px solid #e2e8f0; padding: 0.12rem 0.5rem; border-radius: 999px; }
   .tag.engine { background: #eef4ff; border-color: #cddcff; color: #2563eb; }
-  .body audio { width: 100%; height: 34px; }
   .noaudio { font-size: 0.76rem; color: #a0a6b0; font-style: italic; padding: 0.4rem 0; }
 
   .detail { padding: 0 1rem 0.5rem; }
+  .player { width: 100%; height: 36px; margin-bottom: 0.6rem; }
+  .muted-tag { color: #a0a6b0; background: #f4f6fb; }
   .config { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.35rem 1rem; padding: 0.6rem 0; border-top: 1px solid #eef1f6; }
   .ci { display: flex; justify-content: space-between; font-size: 0.74rem; color: #6b7280; }
   .ci b { color: #1a1f36; font-weight: 600; }
