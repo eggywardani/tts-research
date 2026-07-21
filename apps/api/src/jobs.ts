@@ -147,6 +147,35 @@ export async function recoverStaleJobs(): Promise<number> {
   return rows.length;
 }
 
+// Delete finished jobs (anything not queued/processing) older than the cutoff.
+// Only the ephemeral queue row is removed — the History archive + S3 audio are
+// separate and untouched (jobs.history_id references history ON DELETE SET NULL,
+// not the other way round).
+export async function cleanupOldJobs(olderThanSeconds = 3600): Promise<number> {
+  const rows = (await sql`
+    DELETE FROM jobs
+    WHERE status NOT IN ('queued', 'processing')
+      AND COALESCE(completed_at, created_at) < now() - (${olderThanSeconds} * interval '1 second')
+    RETURNING id
+  `) as { id: string }[];
+  return rows.length;
+}
+
+// Periodically prune old finished jobs. Runs once at boot, then on an interval.
+let cleanupStarted = false;
+export function startJobCleanup(intervalMs = 5 * 60 * 1000, olderThanSeconds = 3600): void {
+  if (cleanupStarted) return;
+  cleanupStarted = true;
+  const run = () =>
+    cleanupOldJobs(olderThanSeconds)
+      .then((n) => {
+        if (n) console.log(`[api] pruned ${n} finished job(s) older than ${olderThanSeconds}s`);
+      })
+      .catch((err) => console.error('[api] job cleanup failed:', err));
+  run();
+  setInterval(run, intervalMs);
+}
+
 // ── In-process event bus (live SSE) ──────────────────────────────────────────
 
 type Listener = (event: string, data: unknown) => void;

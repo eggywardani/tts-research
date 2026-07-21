@@ -13,6 +13,7 @@ import {
   subscribe,
   wake,
   recoverStaleJobs,
+  startJobCleanup,
   isTerminal,
   type Job,
   type JobRequest,
@@ -280,6 +281,7 @@ try {
   const recovered = await recoverStaleJobs();
   if (recovered) console.log(`[api] requeued ${recovered} stale job(s)`);
   startWorkers();
+  startJobCleanup(); // prune finished jobs older than 1h, every 5 min
 } catch (err) {
   console.error('[api] boot failed — is DATABASE_URL reachable?', err);
 }
