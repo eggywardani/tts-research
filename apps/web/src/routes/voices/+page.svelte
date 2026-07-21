@@ -6,7 +6,8 @@
 
   const MAX_MB = 50;
   const MIN_SEC = 3;
-  const MAX_SEC = 60;
+  const MAX_SEC = 30; // hard cap — longer references slow generation + hurt clone quality
+  const REC_SEC = 10; // recommended clip length (OmniVoice works best on 3–10s)
 
   let speakers = $state<Speaker[]>([]);
   let loading = $state(true);
@@ -101,8 +102,9 @@
       peaks = computePeaks(buffer, 240);
       audioObjUrl = URL.createObjectURL(f);
       trimStart = 0;
-      // Default the selection to at most MAX_SEC; user can trim further.
-      trimEnd = Math.min(buffer.duration, MAX_SEC);
+      // Default the selection to a short recommended window (~10s) so a good
+      // reference is used even without manual trimming; user can adjust.
+      trimEnd = Math.min(buffer.duration, REC_SEC);
       file = f;
       if (!name) name = f.name.replace(/\.[^.]+$/, '');
     } catch (e) {
@@ -265,7 +267,7 @@
         <div class="dz-hint">Click or drop an audio file</div>
       {/if}
     </div>
-    <p class="constraints">WAV, MP3, FLAC, OGG · {MIN_SEC}s min — {MAX_SEC}s max · {MAX_MB} MB limit · Best: 8–25s clear speech</p>
+    <p class="constraints">WAV, MP3, FLAC, OGG · {MIN_SEC}s min — {MAX_SEC}s max · {MAX_MB} MB limit · <b>Best: 3–10s clear speech</b></p>
 
     {#if analysis}
       <div class="analysis {analysis.score >= 85 ? 'good' : analysis.score >= 60 ? 'ok' : 'bad'}">
@@ -282,6 +284,9 @@
       </div>
 
       <WaveformTrimmer {peaks} duration={audioBuffer?.duration ?? 0} bind:start={trimStart} bind:end={trimEnd} audioUrl={audioObjUrl} minGap={MIN_SEC} />
+      {#if trimEnd - trimStart > 15}
+        <p class="trim-warn">⚠ Long reference ({(trimEnd - trimStart).toFixed(0)}s). OmniVoice clones best on 3–10s — trim shorter for faster, cleaner results.</p>
+      {/if}
     {/if}
 
     <button class="go" onclick={upload} disabled={uploading || !file}>{uploading ? 'Saving…' : 'Save to library'}</button>
@@ -410,6 +415,8 @@
   .dz-clear { margin-top: 0.5rem; background: #fff; border: 1px solid #e2e8f0; color: #64748b; border-radius: 8px; padding: 0.25rem 0.7rem; cursor: pointer; font-size: 0.76rem; }
   .dz-clear:hover { color: #dc2626; border-color: #fecaca; }
   .constraints { margin: 0.5rem 0 1rem; font-size: 0.75rem; color: #8a93a6; }
+  .constraints b { color: #475569; }
+  .trim-warn { margin: 0.6rem 0 0; font-size: 0.78rem; color: #b45309; background: #fef7ec; border: 1px solid #f6dcae; border-radius: 8px; padding: 0.5rem 0.7rem; }
 
   .analysis { border: 1px solid #e6eaf1; border-radius: 12px; padding: 1rem 1.1rem; margin-bottom: 1rem; background: #f8fafc; }
   .analysis.good { background: #f0fbf4; border-color: #cceedd; }
