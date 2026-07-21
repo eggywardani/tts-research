@@ -41,7 +41,7 @@
     return j.status === 'completed' && !!(j.history_id ?? j.id);
   }
   function open(j: Job) {
-    if (openable(j)) goto(`/history?focus=${j.history_id ?? j.id}`);
+    if (openable(j)) goto(`/history/${j.history_id ?? j.id}`);
   }
 
   function when(iso: string): string {

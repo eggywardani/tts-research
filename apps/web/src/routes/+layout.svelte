@@ -13,7 +13,10 @@
 
   let path = $derived($page.url.pathname);
   let bare = $derived(path === '/login');
-  let current = $derived(nav.find((n) => n.href === path) ?? nav[0]);
+  // Match sub-routes too (e.g. /history/<id> → History) so the header + active
+  // nav stay correct on detail pages.
+  const matches = (href: string, p: string) => p === href || (href !== '/' && p.startsWith(href + '/'));
+  let current = $derived(nav.find((n) => matches(n.href, path)) ?? nav[0]);
 
   let sidebarOpen = $state(false);
 </script>
@@ -37,7 +40,7 @@
 
       <nav class="side-nav">
         {#each nav as item}
-          <a href={item.href} class="nav-link" class:active={path === item.href} onclick={() => (sidebarOpen = false)}>
+          <a href={item.href} class="nav-link" class:active={matches(item.href, path)} onclick={() => (sidebarOpen = false)}>
             {#if item.icon === 'star'}
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg>
             {:else if item.icon === 'user'}

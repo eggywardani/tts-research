@@ -18,7 +18,7 @@
   // Voice cloning is the default mode; the reference clip is chosen from the
   // saved Voice Library (upload/manage voices lives on the /voices page).
   let mode = $state<'clone' | 'design'>('clone');
-  let text = $state('Hello — this is a test of the OmniVoice engine. It can speak long passages, split into chunks and streamed back as they render.');
+  let text = $state('Hello, this is a test of the OmniVoice engine. It can speak long passages, split them into chunks, and stream them back as they render.');
   let refText = $state('');
   let instruct = $state('female, low pitch, british accent');
 
@@ -181,8 +181,8 @@
     jobStatus = status;
     if (status === 'completed') {
       savedUrl = url;
-      // Jump straight to the result detail, like audio-processor-llm.
-      goto(`/history?focus=${historyId ?? jobId}`);
+      // Jump straight to the result detail page, like audio-processor-llm.
+      goto(`/history/${historyId ?? jobId}`);
     } else if (status === 'cancelled') {
       error = 'Cancelled.';
     } else if (status === 'failed') {
