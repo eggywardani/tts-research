@@ -4,6 +4,7 @@
   import {
     fetchHealth,
     fetchSpeakers,
+    updateSpeaker,
     createJob,
     streamJob,
     pollJob,
@@ -94,6 +95,35 @@
     if (p.rvc_pitch != null) rvcPitch = p.rvc_pitch;
     const engine = s.default_engine || 'omnivoice';
     refText = s.engines?.[engine]?.ref_text ?? '';
+  }
+
+  // Persist the current experiment settings back to the selected voice's preset.
+  let savingPreset = $state(false);
+  let savedFlash = $state(false);
+
+  async function savePreset() {
+    const s = speakers.find((x) => x.id === selectedSpeakerId);
+    if (!s) return;
+    savingPreset = true;
+    error = '';
+    const preset = { temperature, top_p: topP, cfg_scale: cfgScale, seed, use_rvc: useRvc, rvc_model: rvcModel, rvc_pitch: rvcPitch };
+    const engine = s.default_engine || 'omnivoice';
+    const engines = { ...(s.engines ?? {}), [engine]: { ...(s.engines?.[engine] ?? {}), preset, ref_text: refText.trim() } };
+    try {
+      const updated = await updateSpeaker(s.id, { voice_preset: preset, engines });
+      speakers = speakers.map((x) => (x.id === s.id ? updated : x));
+      savedFlash = true;
+      setTimeout(() => (savedFlash = false), 1800);
+    } catch (e) {
+      error = String(e instanceof Error ? e.message : e);
+    } finally {
+      savingPreset = false;
+    }
+  }
+
+  function resetPreset() {
+    const s = speakers.find((x) => x.id === selectedSpeakerId);
+    if (s) selectVoice(s); // reload sliders + ref text from the saved voice
   }
 
   function reset() {
@@ -368,6 +398,16 @@
           </div>
         {/if}
       </div>
+
+      {#if mode === 'clone' && selectedSpeakerId}
+        <div class="preset-actions">
+          <button class="reset" onclick={resetPreset} disabled={savingPreset}>Reset</button>
+          <button class="save-preset" onclick={savePreset} disabled={savingPreset}>
+            {savingPreset ? 'Saving…' : savedFlash ? 'Saved ✓' : 'Save to voice'}
+          </button>
+        </div>
+        <p class="preset-hint">Generation uses these values live. Save to store them on “{speakers.find((s) => s.id === selectedSpeakerId)?.name}”.</p>
+      {/if}
     </section>
   </aside>
 </div>
@@ -466,6 +506,13 @@
   .tabs button.active { background: #2563eb; border-color: #2563eb; color: #fff; }
   .rvc-field { margin: 0.9rem 0; }
   .rvc-note { margin: 0.4rem 0 0; font-size: 0.74rem; line-height: 1.4; color: #8a93a6; }
+  .preset-actions { display: flex; gap: 0.5rem; margin-top: 1.25rem; }
+  .preset-actions .reset { flex: none; background: #fff; border: 1px solid #e2e8f0; color: #475569; border-radius: 9px; padding: 0.5rem 0.9rem; cursor: pointer; font-size: 0.85rem; }
+  .preset-actions .reset:hover { background: #f8fafc; }
+  .preset-actions .save-preset { flex: 1; background: #2563eb; border: none; color: #fff; border-radius: 9px; padding: 0.5rem 0.9rem; cursor: pointer; font-size: 0.85rem; font-weight: 600; }
+  .preset-actions .save-preset:hover { background: #1d4ed8; }
+  .preset-actions button:disabled { opacity: 0.6; cursor: default; }
+  .preset-hint { margin: 0.55rem 0 0; font-size: 0.72rem; line-height: 1.4; color: #8a93a6; }
   .toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569; }
   .toggle input { width: auto; }
   .go { background: #2563eb; border: none; color: white; font-weight: 600; padding: 0.75rem; border-radius: 10px; cursor: pointer; font-size: 1rem; }
