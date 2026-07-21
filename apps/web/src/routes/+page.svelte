@@ -9,7 +9,6 @@
     streamJob,
     pollJob,
     cancelJob,
-    b64ToAudioUrl,
     type SpeakInput,
     type JobEvent,
     type Speaker,
@@ -50,15 +49,8 @@
   let jobStatus = $state<string>('');
   let queuePos = $state(0);
 
-  // streaming state
+  // progress only — the result opens on the detail page, no inline audio here
   let progress = $state({ done: 0, total: 0 });
-  type Chunk = { index: number; text: string; url: string };
-  let chunks = $state<Chunk[]>([]);
-  let savedUrl = $state<string | null>(null);
-  let playIdx = $state(-1);
-  let audioEl: HTMLAudioElement | null = null;
-  let playQueue: number[] = [];
-  let isPlaying = false;
 
   // ── Persist studio inputs to localStorage so text + settings survive reloads
   // (no more re-pasting the script). Mirrors audio-processor-llm's tts_* keys. ──
@@ -180,16 +172,10 @@
 
   function reset() {
     error = '';
-    savedUrl = null;
     jobId = null;
     jobStatus = '';
     queuePos = 0;
-    chunks.forEach((c) => URL.revokeObjectURL(c.url));
-    chunks = [];
     progress = { done: 0, total: 0 };
-    playIdx = -1;
-    playQueue = [];
-    isPlaying = false;
   }
 
   function validate(): SpeakInput | null {
@@ -206,33 +192,9 @@
     };
   }
 
-  // Play chunks strictly in order as they arrive.
-  function enqueue(index: number) {
-    playQueue.push(index);
-    playQueue.sort((a, b) => a - b);
-    pump();
-  }
-  function pump() {
-    if (isPlaying || !audioEl || playQueue.length === 0) return;
-    const next = playQueue[0];
-    const chunk = chunks.find((c) => c.index === next);
-    if (!chunk) return;
-    playQueue.shift();
-    isPlaying = true;
-    playIdx = next;
-    audioEl.src = chunk.url;
-    audioEl.play().catch(() => { isPlaying = false; });
-  }
-  function onEnded() {
-    isPlaying = false;
-    playIdx = -1;
-    pump();
-  }
-
   function onDone(status: string, url: string | null, historyId: string | null, detail?: string) {
     jobStatus = status;
     if (status === 'completed') {
-      savedUrl = url;
       // Jump straight to the result detail page, like audio-processor-llm.
       goto(`/history/${historyId ?? jobId}`);
     } else if (status === 'cancelled') {
@@ -269,9 +231,7 @@
             jobStatus = 'processing';
             progress = { done: 0, total: e.total };
           } else if (e.type === 'chunk') {
-            chunks = [...chunks, { index: e.index, text: e.text, url: b64ToAudioUrl(e.audio) }];
-            progress = { done: chunks.length, total: e.total };
-            enqueue(e.index);
+            progress = { done: e.index + 1, total: e.total };
           } else if (e.type === 'completed') {
             settled = true;
             onDone('completed', e.url, e.history_id);
@@ -311,8 +271,6 @@
     }
   }
 </script>
-
-<audio bind:this={audioEl} onended={onEnded} hidden></audio>
 
 <div class="studio-layout">
   <!-- LEFT: text + voice source + generate + results -->
@@ -360,20 +318,6 @@
           <div class="bar"><div class="fill" style="width: {(progress.done / progress.total) * 100}%"></div></div>
           <span>{progress.done}/{progress.total} chunks</span>
         </div>
-        <ol class="chunks">
-          {#each chunks as c (c.index)}
-            <li class:playing={playIdx === c.index}>
-              <span class="idx">{c.index + 1}</span>
-              <span class="ctext">{c.text}</span>
-              <audio controls src={c.url}></audio>
-            </li>
-          {/each}
-        </ol>
-        {#if savedUrl}
-          <div class="result">
-            <div class="meta"><b>Saved to history.</b> <a href={savedUrl}>full recording</a></div>
-          </div>
-        {/if}
       {/if}
     </section>
   </div>
