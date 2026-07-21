@@ -97,7 +97,10 @@ export async function runGeneration(jobId: string, req: JobRequest, hooks: Gener
     await reader.cancel().catch(() => {});
   };
 
-  outer: for (;;) {
+  const errors: string[] = [];
+  let streamError: string | null = null;
+
+  for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
     buffered += dec.decode(value, { stream: true });
@@ -123,7 +126,14 @@ export async function runGeneration(jobId: string, req: JobRequest, hooks: Gener
         if (ev.sample_rate) sampleRate = String(ev.sample_rate);
         await hooks.onChunk?.(ev.index, ev.total ?? total, ev.text ?? '', ev.audio);
       } else if (ev.type === 'chunk_error') {
+        const detail = ev.detail ?? 'failed';
         chunkMeta.push({ index: ev.index, text: '', status: 'failed' });
+        errors.push(`chunk ${ev.index}: ${detail}`);
+        console.error(`[api] job ${jobId} chunk ${ev.index} failed: ${detail}`);
+      } else if (ev.type === 'error') {
+        // Top-level TTS failure (whole generation aborted on the Python side).
+        streamError = ev.detail ?? 'unknown TTS error';
+        console.error(`[api] job ${jobId} TTS error: ${streamError}`);
       }
 
       if (await hooks.isCancelled?.()) {
@@ -135,6 +145,14 @@ export async function runGeneration(jobId: string, req: JobRequest, hooks: Gener
 
   // Merge + archive + record history.
   const merged = chunkAudio.length ? mergeWavs(chunkAudio, Number(sampleRate) || 24000) : null;
+
+  // No usable audio → surface as a job failure (with the real reason) instead of
+  // silently "completing" with an empty result.
+  if (!merged) {
+    const detail = streamError || errors.join('; ') || 'TTS produced no audio (check the TTS service logs — often a GPU/CUDA issue)';
+    throw new Error(detail);
+  }
+
   let filePath: string | null = null;
   if (merged && isS3Enabled()) {
     filePath = `${S3_PREFIX.outputs}${jobId}.wav`;
