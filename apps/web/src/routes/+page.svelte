@@ -342,8 +342,8 @@
             {/each}
           </div>
           <label class="field ref">
-            <span>Reference transcript</span>
-            <input bind:value={refText} placeholder="What the reference clip says…" />
+            <span>Reference transcript <em>(leave blank to auto-transcribe)</em></span>
+            <input bind:value={refText} placeholder="Blank = auto. Only fill if it EXACTLY matches the clip." />
           </label>
         {:else}
           <div class="empty-voices">
@@ -459,6 +459,7 @@
   .v-lang { flex: none; font-size: 0.68rem; color: #64748b; background: #eef1f6; padding: 0.1rem 0.4rem; border-radius: 999px; text-transform: uppercase; }
   .voice-card .ref { margin-bottom: 0; }
   .voice-card .ref > span { font-size: 0.8rem; color: #475569; font-weight: 500; }
+  .voice-card .ref > span em { font-style: normal; font-weight: 400; color: #9aa1af; font-size: 0.72rem; }
   .settings-hint { margin: 0 0 1rem; font-size: 0.8rem; color: #8a93a6; }
   .setting { margin-bottom: 1.25rem; }
   .setting:last-child { margin-bottom: 0; }

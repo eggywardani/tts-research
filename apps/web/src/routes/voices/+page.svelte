@@ -240,7 +240,7 @@
       <label class="field grow"><span>Name</span><input bind:value={name} placeholder="e.g. Narrator" /></label>
       <label class="field lang"><span>Language</span><input bind:value={language} placeholder="en" /></label>
     </div>
-    <label class="field"><span>Reference transcript (optional)</span><input bind:value={refText} placeholder="What the clip says…" /></label>
+    <label class="field"><span>Reference transcript (optional — blank auto-transcribes)</span><input bind:value={refText} placeholder="Leave blank unless it EXACTLY matches the clip" /></label>
 
     <span class="field-label">Audio reference (source)</span>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -328,7 +328,7 @@
                 <label class="field lang"><span>Language</span><input bind:value={eLang} /></label>
               </div>
 
-              <label class="field"><span>Reference transcript (what the clip says — improves cloning)</span>
+              <label class="field"><span>Reference transcript (blank = auto-transcribe; only fill if it EXACTLY matches the clip)</span>
                 <input bind:value={eRefText} placeholder="e.g. Hello, this is a test of my voice." />
               </label>
 
