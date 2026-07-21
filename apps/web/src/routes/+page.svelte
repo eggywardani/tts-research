@@ -60,7 +60,42 @@
   let playQueue: number[] = [];
   let isPlaying = false;
 
+  // ── Persist studio inputs to localStorage so text + settings survive reloads
+  // (no more re-pasting the script). Mirrors audio-processor-llm's tts_* keys. ──
+  function lsGet<T>(key: string, fallback: T): T {
+    try {
+      const v = localStorage.getItem(key);
+      return v == null ? fallback : (JSON.parse(v) as T);
+    } catch {
+      return fallback;
+    }
+  }
+  function lsSet(key: string, val: unknown) {
+    try {
+      localStorage.setItem(key, JSON.stringify(val));
+    } catch {
+      /* storage full / unavailable — ignore */
+    }
+  }
+
+  let restored = $state(false);
+
   onMount(async () => {
+    // Restore before loading speakers so a saved voice selection is respected.
+    text = lsGet('tts_text', text);
+    mode = lsGet('tts_mode', mode);
+    instruct = lsGet('tts_instruct', instruct);
+    refText = lsGet('tts_refText', refText);
+    selectedSpeakerId = lsGet('tts_speaker', '');
+    temperature = lsGet('tts_temperature', temperature);
+    topP = lsGet('tts_topP', topP);
+    cfgScale = lsGet('tts_cfgScale', cfgScale);
+    seed = lsGet('tts_seed', seed);
+    useRvc = lsGet('tts_useRvc', useRvc);
+    rvcModel = lsGet('tts_rvcModel', rvcModel);
+    rvcPitch = lsGet('tts_rvcPitch', rvcPitch);
+    restored = true;
+
     try {
       health = await fetchHealth();
     } catch (e) {
@@ -69,12 +104,29 @@
     await loadSpeakers();
   });
 
+  // Save each field as it changes (only after the initial restore).
+  $effect(() => { if (restored) lsSet('tts_text', text); });
+  $effect(() => { if (restored) lsSet('tts_mode', mode); });
+  $effect(() => { if (restored) lsSet('tts_instruct', instruct); });
+  $effect(() => { if (restored) lsSet('tts_refText', refText); });
+  $effect(() => { if (restored) lsSet('tts_speaker', selectedSpeakerId); });
+  $effect(() => { if (restored) lsSet('tts_temperature', temperature); });
+  $effect(() => { if (restored) lsSet('tts_topP', topP); });
+  $effect(() => { if (restored) lsSet('tts_cfgScale', cfgScale); });
+  $effect(() => { if (restored) lsSet('tts_seed', seed); });
+  $effect(() => { if (restored) lsSet('tts_useRvc', useRvc); });
+  $effect(() => { if (restored) lsSet('tts_rvcModel', rvcModel); });
+  $effect(() => { if (restored) lsSet('tts_rvcPitch', rvcPitch); });
+
   async function loadSpeakers() {
     try {
       speakers = await fetchSpeakers();
-      // Default to the first saved voice so cloning works out of the box.
-      if (!selectedSpeakerId && speakers.length > 0) {
-        selectVoice(speakers[0]);
+      // Keep a restored voice if it still exists (preserves restored settings).
+      // Otherwise fall back to the first voice + load its preset.
+      const exists = selectedSpeakerId && speakers.some((s) => s.id === selectedSpeakerId);
+      if (!exists) {
+        selectedSpeakerId = '';
+        if (speakers.length > 0) selectVoice(speakers[0]);
       }
     } catch {
       speakers = [];

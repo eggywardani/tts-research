@@ -108,7 +108,7 @@ async def _parse_request(
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(await speaker_wav.read())
             tmp_path = tmp.name
-        ref_path = tmp_path
+        ref_path = _prep_reference(tmp_path)
 
     if not ref_path and not instruct:
         raise HTTPException(
@@ -133,6 +133,33 @@ async def _parse_request(
         ref_path=ref_path,
         tmp_path=tmp_path,
     )
+
+
+# Trailing silence appended to every reference clip. OmniVoice (F5-style) trims
+# the reference portion of its output by duration; if that boundary is slightly
+# off, the clip's LAST WORD leaks into the start of every generated chunk (users
+# hear a stray "for"/"four"). Padding the reference with silence makes the trim
+# land in quiet instead, so nothing bleeds through.
+_REF_TAIL_SILENCE_SEC = 0.35
+
+
+def _prep_reference(path: str) -> str:
+    try:
+        wav, sr = sf.read(path, dtype="float32")
+        if wav.ndim > 1:
+            wav = wav.mean(axis=1)
+        # Trim existing trailing near-silence first so the pad is deterministic.
+        thresh = 0.02
+        idx = len(wav)
+        while idx > 0 and abs(wav[idx - 1]) < thresh:
+            idx -= 1
+        wav = wav[:idx]
+        pad = np.zeros(int(sr * _REF_TAIL_SILENCE_SEC), dtype=np.float32)
+        wav = np.concatenate([wav.astype(np.float32), pad])
+        sf.write(path, wav, sr, subtype="PCM_16")
+    except Exception as exc:  # noqa: BLE001 — best-effort; fall back to the raw clip
+        print(f"[ref] could not pad reference ({exc}) — using as-is")
+    return path
 
 
 def _generate_chunk(req: SpeakRequest, chunk_text: str) -> tuple[np.ndarray, int]:
