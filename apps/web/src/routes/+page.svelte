@@ -73,18 +73,17 @@
       speakers = await fetchSpeakers();
       // Default to the first saved voice so cloning works out of the box.
       if (!selectedSpeakerId && speakers.length > 0) {
-        selectedSpeakerId = speakers[0].id;
-        onPickSpeaker();
+        selectVoice(speakers[0]);
       }
     } catch {
       speakers = [];
     }
   }
 
-  // When a saved voice is picked, pre-fill the sampling sliders from its preset.
-  function onPickSpeaker() {
-    const s = speakers.find((x) => x.id === selectedSpeakerId);
-    if (!s) return;
+  // Pick a saved voice: load its preset into the sliders + its saved reference
+  // transcript (both come from the voice's own settings).
+  function selectVoice(s: Speaker) {
+    selectedSpeakerId = s.id;
     const p = s.voice_preset ?? {};
     if (p.temperature != null) temperature = p.temperature;
     if (p.top_p != null) topP = p.top_p;
@@ -93,6 +92,8 @@
     if (p.use_rvc != null) useRvc = p.use_rvc;
     if (p.rvc_model != null) rvcModel = p.rvc_model;
     if (p.rvc_pitch != null) rvcPitch = p.rvc_pitch;
+    const engine = s.default_engine || 'omnivoice';
+    refText = s.engines?.[engine]?.ref_text ?? '';
   }
 
   function reset() {
@@ -263,27 +264,6 @@
           <span>Describe the voice (instruct)</span>
           <input bind:value={instruct} placeholder="female, low pitch, british accent" />
         </label>
-      {:else}
-        {#if speakers.length > 0}
-          <label class="field">
-            <span>Voice (from library)</span>
-            <select bind:value={selectedSpeakerId} onchange={onPickSpeaker}>
-              {#each speakers as s}
-                <option value={s.id}>{s.name} · {s.language}</option>
-              {/each}
-            </select>
-          </label>
-
-          <label class="field">
-            <span>Reference transcript (optional — overrides the saved one)</span>
-            <input bind:value={refText} placeholder="What the reference clip says…" />
-          </label>
-        {:else}
-          <div class="empty-voices">
-            No saved voices yet. Add a reference clip in the
-            <a href="/voices">Voice Library</a> to clone from it.
-          </div>
-        {/if}
       {/if}
 
       <div class="action-bar">
@@ -323,8 +303,33 @@
     </section>
   </div>
 
-  <!-- RIGHT: configuration (taken from the selected voice) -->
+  <!-- RIGHT: voice + configuration (taken from the selected voice) -->
   <aside class="studio-side">
+    {#if mode === 'clone'}
+      <section class="card voice-card">
+        <h3>Voice</h3>
+        {#if speakers.length > 0}
+          <div class="voice-list">
+            {#each speakers as s}
+              <button class="voice-item" class:selected={selectedSpeakerId === s.id} onclick={() => selectVoice(s)}>
+                <span class="v-icon">{s.name.slice(0, 1).toUpperCase()}</span>
+                <span class="v-name">{s.name}</span>
+                <span class="v-lang">{s.language}</span>
+              </button>
+            {/each}
+          </div>
+          <label class="field ref">
+            <span>Reference transcript</span>
+            <input bind:value={refText} placeholder="What the reference clip says…" />
+          </label>
+        {:else}
+          <div class="empty-voices">
+            No saved voices yet. Add a clip in the <a href="/voices">Voice Library</a>.
+          </div>
+        {/if}
+      </section>
+    {/if}
+
     <section class="card settings" class:disabled={settingsDisabled}>
       <h3>Settings</h3>
 
@@ -391,9 +396,20 @@
   .studio-main { display: flex; flex-direction: column; gap: 1.25rem; min-width: 0; }
   .page-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
   .sub { margin: 0; color: #6b7280; font-size: 0.9rem; }
-  .settings { position: sticky; top: 0; }
+  .studio-side { display: flex; flex-direction: column; gap: 1.25rem; }
   .settings.disabled { opacity: 0.55; }
-  .settings h3 { margin: 0 0 1rem; font-size: 0.8rem; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; }
+  .settings h3, .voice-card h3 { margin: 0 0 1rem; font-size: 0.8rem; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; }
+
+  .voice-list { display: flex; flex-direction: column; gap: 0.4rem; max-height: 220px; overflow-y: auto; margin-bottom: 1rem; }
+  .voice-item { display: flex; align-items: center; gap: 0.6rem; width: 100%; text-align: left; padding: 0.45rem 0.6rem; background: #fff; border: 1px solid #e2e8f0; border-radius: 9px; cursor: pointer; font: inherit; }
+  .voice-item:hover { border-color: #cbd5e1; background: #f8fafc; }
+  .voice-item.selected { border-color: #2563eb; background: #eef4ff; }
+  .v-icon { width: 26px; height: 26px; flex: none; display: grid; place-items: center; background: #e6eaf1; color: #4f566b; border-radius: 7px; font-size: 0.72rem; font-weight: 700; }
+  .voice-item.selected .v-icon { background: #2563eb; color: #fff; }
+  .v-name { flex: 1; font-size: 0.86rem; font-weight: 500; color: #1a1f36; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .v-lang { flex: none; font-size: 0.68rem; color: #64748b; background: #eef1f6; padding: 0.1rem 0.4rem; border-radius: 999px; text-transform: uppercase; }
+  .voice-card .ref { margin-bottom: 0; }
+  .voice-card .ref > span { font-size: 0.8rem; color: #475569; font-weight: 500; }
   .settings-hint { margin: 0 0 1rem; font-size: 0.8rem; color: #8a93a6; }
   .setting { margin-bottom: 1.25rem; }
   .setting:last-child { margin-bottom: 0; }
@@ -428,11 +444,11 @@
   .card { background: #fff; border: 1px solid #e6eaf1; border-radius: 14px; padding: 1.4rem; box-shadow: 0 1px 2px rgba(16,24,40,0.04); }
   .field { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem; }
   .field > span { font-size: 0.82rem; color: #475569; font-weight: 500; }
-  textarea, input:not([type]), input[type='number'], select {
+  textarea, input:not([type]), input[type='number'] {
     background: #fff; border: 1px solid #d8dee9; border-radius: 9px;
     color: #1a1f36; padding: 0.55rem 0.7rem; font: inherit; width: 100%; box-sizing: border-box;
   }
-  textarea:focus, input:focus, select:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
+  textarea:focus, input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
   textarea { resize: vertical; }
   .empty-voices { font-size: 0.85rem; color: #6b7280; background: #f8fafc; border: 1px dashed #d8dee9; border-radius: 9px; padding: 0.85rem 1rem; margin-bottom: 1rem; }
   .empty-voices a { color: #2563eb; font-weight: 500; }
