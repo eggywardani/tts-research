@@ -67,6 +67,8 @@ services:
       - AUTH_PASSWORD=${AUTH_PASSWORD:-}
       - AUTH_SECRET=${AUTH_SECRET:-}
       - API_TOKEN=${API_TOKEN:-}
+      # Max upload size (adapter-node default is only 512K → blocks audio uploads).
+      - BODY_SIZE_LIMIT=${BODY_SIZE_LIMIT:-50M}
     depends_on: [api]
 
   # Cloudflare Tunnel — exposes the stack publicly with no inbound port (required

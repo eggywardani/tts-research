@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fetchSpeakers, createSpeaker, updateSpeaker, deleteSpeaker, type Speaker, type VoicePreset } from '$lib/api';
+  import { decodeAudioFile, analyzeAudio, computePeaks, sliceToWav, type AudioAnalysis } from '$lib/audio';
+  import WaveformTrimmer from '$lib/WaveformTrimmer.svelte';
+
+  const MAX_MB = 50;
+  const MIN_SEC = 3;
+  const MAX_SEC = 60;
 
   let speakers = $state<Speaker[]>([]);
   let loading = $state(true);
@@ -13,6 +19,16 @@
   let file = $state<File | null>(null);
   let uploading = $state(false);
   let fileInput: HTMLInputElement | null = null;
+
+  // pre-upload analysis + trim (client-side)
+  let analyzing = $state(false);
+  let analysis = $state<AudioAnalysis | null>(null);
+  let peaks = $state<number[]>([]);
+  let audioBuffer: AudioBuffer | null = null;
+  let audioObjUrl = $state('');
+  let trimStart = $state(0);
+  let trimEnd = $state(0);
+  let dragOver = $state(false);
 
   // per-voice settings editor
   let editId = $state<string | null>(null);
@@ -40,29 +56,84 @@
     }
   }
 
-  function onFile(e: Event) {
-    file = (e.target as HTMLInputElement).files?.[0] ?? null;
-    if (file && !name) name = file.name.replace(/\.[^.]+$/, '');
+  function resetUpload() {
+    file = null;
+    analysis = null;
+    peaks = [];
+    audioBuffer = null;
+    if (audioObjUrl) URL.revokeObjectURL(audioObjUrl);
+    audioObjUrl = '';
+    trimStart = 0;
+    trimEnd = 0;
+    if (fileInput) fileInput.value = '';
+  }
+
+  function onFilePick(e: Event) {
+    const f = (e.target as HTMLInputElement).files?.[0] ?? null;
+    if (f) void loadFile(f);
+  }
+  function onDrop(e: DragEvent) {
+    e.preventDefault();
+    dragOver = false;
+    const f = e.dataTransfer?.files?.[0] ?? null;
+    if (f) void loadFile(f);
+  }
+
+  // Decode + analyze the file in the browser before any upload.
+  async function loadFile(f: File) {
+    error = '';
+    if (f.size > MAX_MB * 1024 * 1024) {
+      error = `File too large (max ${MAX_MB} MB).`;
+      return;
+    }
+    analyzing = true;
+    resetUpload();
+    try {
+      const buffer = await decodeAudioFile(f);
+      if (buffer.duration < MIN_SEC) {
+        error = `Clip too short (min ${MIN_SEC}s).`;
+        analyzing = false;
+        return;
+      }
+      audioBuffer = buffer;
+      analysis = analyzeAudio(buffer);
+      peaks = computePeaks(buffer, 240);
+      audioObjUrl = URL.createObjectURL(f);
+      trimStart = 0;
+      // Default the selection to at most MAX_SEC; user can trim further.
+      trimEnd = Math.min(buffer.duration, MAX_SEC);
+      file = f;
+      if (!name) name = f.name.replace(/\.[^.]+$/, '');
+    } catch (e) {
+      error = 'Could not read this audio file. Try WAV / MP3 / FLAC / OGG.';
+    } finally {
+      analyzing = false;
+    }
   }
 
   async function upload() {
     error = '';
     if (!name.trim()) return (error = 'Give the voice a name.'), undefined;
-    if (!file) return (error = 'Choose an audio file.'), undefined;
+    if (!file || !audioBuffer) return (error = 'Choose an audio file.'), undefined;
+    const selLen = trimEnd - trimStart;
+    if (selLen < MIN_SEC) return (error = `Select at least ${MIN_SEC}s.`), undefined;
+    if (selLen > MAX_SEC) return (error = `Selection too long (max ${MAX_SEC}s) — trim it.`), undefined;
+
     uploading = true;
     try {
+      // Trim to the selected region + normalize to a mono 16-bit WAV client-side.
+      const wav = sliceToWav(audioBuffer, trimStart, trimEnd);
+      const trimmed = new File([wav], `${name.trim() || 'voice'}.wav`, { type: 'audio/wav' });
       await createSpeaker({
         name: name.trim(),
         language: language.trim() || 'en',
         refText,
-        audio: file,
-        // Seed the new voice with the default settings.
+        audio: trimmed,
         preset: { temperature: 0.7, top_p: 0.9, cfg_scale: 2.0, seed: -1, use_rvc: false, rvc_model: '', rvc_pitch: 0 },
       });
       name = '';
       refText = '';
-      file = null;
-      if (fileInput) fileInput.value = '';
+      resetUpload();
       await load();
     } catch (e) {
       error = String(e instanceof Error ? e.message : e);
@@ -129,10 +200,52 @@
       <label class="field lang"><span>Language</span><input bind:value={language} placeholder="en" /></label>
     </div>
     <label class="field"><span>Reference transcript (optional)</span><input bind:value={refText} placeholder="What the clip says…" /></label>
-    <label class="field"><span>Audio file (wav / mp3 / flac / ogg)</span>
-      <input type="file" accept="audio/*" bind:this={fileInput} onchange={onFile} />
-    </label>
-    <button class="go" onclick={upload} disabled={uploading}>{uploading ? 'Uploading…' : 'Upload voice'}</button>
+
+    <span class="field-label">Audio reference (source)</span>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="dropzone"
+      class:over={dragOver}
+      class:has={!!file}
+      role="button"
+      tabindex="0"
+      onclick={() => fileInput?.click()}
+      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput?.click(); } }}
+      ondragover={(e) => { e.preventDefault(); dragOver = true; }}
+      ondragleave={() => (dragOver = false)}
+      ondrop={onDrop}
+    >
+      <input type="file" accept="audio/*,.wav,.mp3,.flac,.ogg" bind:this={fileInput} onchange={onFilePick} hidden />
+      <div class="dz-icon">⭱</div>
+      {#if analyzing}
+        <div class="dz-name">Analyzing…</div>
+      {:else if file}
+        <div class="dz-name">{file.name}</div>
+        <button class="dz-clear" type="button" onclick={(e) => { e.stopPropagation(); resetUpload(); }}>Remove</button>
+      {:else}
+        <div class="dz-hint">Click or drop an audio file</div>
+      {/if}
+    </div>
+    <p class="constraints">WAV, MP3, FLAC, OGG · {MIN_SEC}s min — {MAX_SEC}s max · {MAX_MB} MB limit · Best: 8–25s clear speech</p>
+
+    {#if analysis}
+      <div class="analysis {analysis.score >= 85 ? 'good' : analysis.score >= 60 ? 'ok' : 'bad'}">
+        <div class="an-head">
+          <span class="an-title">Audio quality analysis</span>
+          <span class="an-score">Score: {analysis.score}/100</span>
+        </div>
+        <div class="an-grid">
+          <div class="an-item"><span>Duration</span><b>{analysis.duration.toFixed(2)}s</b></div>
+          <div class="an-item"><span>Noise level</span><b>{analysis.noiseLabel} ({analysis.snrDb.toFixed(1)}dB)</b></div>
+          <div class="an-item"><span>Optimization</span><b>{analysis.optimization}</b></div>
+        </div>
+        <p class="an-msg">💡 {analysis.message}</p>
+      </div>
+
+      <WaveformTrimmer {peaks} duration={audioBuffer?.duration ?? 0} bind:start={trimStart} bind:end={trimEnd} audioUrl={audioObjUrl} minGap={MIN_SEC} />
+    {/if}
+
+    <button class="go" onclick={upload} disabled={uploading || !file}>{uploading ? 'Saving…' : 'Save to library'}</button>
     {#if error}<p class="error">{error}</p>{/if}
   </section>
 
@@ -212,7 +325,31 @@
   .field.grow { flex: 1; }
   .field.lang { width: 6rem; }
   .field > span { font-size: 0.82rem; color: #475569; font-weight: 500; }
+  .field-label { display: block; font-size: 0.82rem; color: #475569; font-weight: 500; margin-bottom: 0.4rem; }
   input:not([type=file]):not([type=range]):not([type=checkbox]):not(.num) { background: #fff; border: 1px solid #d8dee9; border-radius: 9px; color: #1a1f36; padding: 0.55rem 0.7rem; font: inherit; width: 100%; box-sizing: border-box; }
+
+  .dropzone { border: 2px dashed #cddcff; background: #f5f8ff; border-radius: 12px; padding: 1.6rem 1rem; text-align: center; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+  .dropzone:hover, .dropzone.over { background: #eef4ff; border-color: #2563eb; }
+  .dropzone.has { border-style: solid; }
+  .dz-icon { font-size: 1.5rem; color: #2563eb; line-height: 1; }
+  .dz-hint { margin-top: 0.4rem; font-size: 0.85rem; color: #64748b; }
+  .dz-name { margin-top: 0.4rem; font-size: 0.9rem; color: #2563eb; font-weight: 600; word-break: break-all; }
+  .dz-clear { margin-top: 0.5rem; background: #fff; border: 1px solid #e2e8f0; color: #64748b; border-radius: 8px; padding: 0.25rem 0.7rem; cursor: pointer; font-size: 0.76rem; }
+  .dz-clear:hover { color: #dc2626; border-color: #fecaca; }
+  .constraints { margin: 0.5rem 0 1rem; font-size: 0.75rem; color: #8a93a6; }
+
+  .analysis { border: 1px solid #e6eaf1; border-radius: 12px; padding: 1rem 1.1rem; margin-bottom: 1rem; background: #f8fafc; }
+  .analysis.good { background: #f0fbf4; border-color: #cceedd; }
+  .analysis.bad { background: #fef5f5; border-color: #f6d5d5; }
+  .an-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.7rem; }
+  .an-title { font-size: 0.9rem; font-weight: 700; color: #1a1f36; }
+  .an-score { font-size: 0.85rem; font-weight: 700; color: #15803d; }
+  .analysis.bad .an-score { color: #b91c1c; }
+  .an-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.5rem 1rem; }
+  .an-item { display: flex; flex-direction: column; gap: 0.15rem; }
+  .an-item span { font-size: 0.72rem; color: #8a93a6; text-transform: uppercase; letter-spacing: 0.03em; }
+  .an-item b { font-size: 0.9rem; color: #1a1f36; }
+  .an-msg { margin: 0.7rem 0 0; font-size: 0.82rem; color: #475569; }
   input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
   input[type='file'] { color: #6b7280; font: inherit; }
   .go { width: 100%; background: #2563eb; border: none; color: white; font-weight: 600; padding: 0.7rem; border-radius: 10px; cursor: pointer; }

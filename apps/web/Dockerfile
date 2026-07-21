@@ -11,6 +11,9 @@ WORKDIR /app
 COPY --from=build /app/build ./build
 COPY --from=build /app/package.json ./
 ENV PORT=5173
+# adapter-node caps request bodies at 512K by default, which rejects/stalls audio
+# uploads (voice clips). Raise it so /voices uploads go through.
+ENV BODY_SIZE_LIMIT=50M
 EXPOSE 5173
 # adapter-auto emits a node server at build/index.js
 CMD ["bun", "run", "build/index.js"]
