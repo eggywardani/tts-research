@@ -333,9 +333,12 @@
                 {@render param('cfg_scale', eCfg, 1, 5, 0.1, (v) => (eCfg = v))}
               </div>
 
-              <div class="param-head seed">
-                <span>seed <em>(-1 = random)</em></span>
-                <input class="num" type="number" step="1" min="-1" bind:value={eSeed} />
+              <div class="param seed">
+                <div class="param-head">
+                  <span>seed <em>{eSeed === -1 ? '· random' : ''}</em></span>
+                  <input class="num" type="number" step="1" min="-1" bind:value={eSeed} />
+                </div>
+                <input class="slider" type="range" min="-1" max="100" step="1" value={eSeed} oninput={(e) => (eSeed = +e.currentTarget.value)} />
               </div>
 
               <label class="toggle"><input type="checkbox" bind:checked={eUseRvc} /> RVC post-processing</label>
@@ -446,7 +449,7 @@
   .param-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.35rem; }
   .param-head span { font-size: 0.82rem; color: #475569; font-weight: 500; }
   .param-head span em { color: #9aa1af; font-style: normal; font-weight: 400; font-size: 0.72rem; }
-  .param-head.seed { margin-bottom: 1rem; }
+  .param.seed { margin-bottom: 1rem; }
   .num { width: 4.5rem; flex: none; text-align: center; box-sizing: border-box; background: #fff; border: 1px solid #d8dee9; border-radius: 8px; color: #1a1f36; padding: 0.35rem 0.4rem; font: inherit; font-size: 0.82rem; }
   .slider { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; background: #e2e8f0; border-radius: 999px; outline: none; cursor: pointer; }
   .slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: #2563eb; border: 2px solid #fff; border-radius: 50%; cursor: pointer; box-shadow: 0 1px 3px rgba(16,24,40,0.25); }

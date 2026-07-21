@@ -259,13 +259,6 @@
         <button class:active={mode === 'design'} onclick={() => (mode = 'design')}>Voice design</button>
       </div>
 
-      {#if mode === 'design'}
-        <label class="field">
-          <span>Describe the voice (instruct)</span>
-          <input bind:value={instruct} placeholder="female, low pitch, british accent" />
-        </label>
-      {/if}
-
       <div class="action-bar">
         {#if loading && (jobStatus === 'queued' || jobStatus === 'processing')}
           <span class="job-status">
@@ -328,6 +321,14 @@
           </div>
         {/if}
       </section>
+    {:else}
+      <section class="card voice-card">
+        <h3>Voice design</h3>
+        <label class="field ref">
+          <span>Describe the voice (instruct)</span>
+          <input bind:value={instruct} placeholder="female, low pitch, british accent" />
+        </label>
+      </section>
     {/if}
 
     <section class="card settings" class:disabled={settingsDisabled}>
@@ -345,9 +346,10 @@
 
       <div class="param seed-row">
         <div class="param-head">
-          <span>seed <em>(-1 = random)</em></span>
+          <span>seed <em>{seed === -1 ? '· random' : ''}</em></span>
           <input class="num" type="number" step="1" min="-1" bind:value={seed} disabled={settingsDisabled} />
         </div>
+        <input class="slider" type="range" min="-1" max="100" step="1" value={seed} oninput={(e) => (seed = +e.currentTarget.value)} disabled={settingsDisabled} />
       </div>
 
       <div class="setting rvc">
