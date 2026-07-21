@@ -17,15 +17,6 @@ export interface SpeakInput {
   speakerId?: string | null; // reuse a saved voice for cloning
 }
 
-export interface SpeakResult {
-  audioUrl: string;
-  historyId?: string;
-  s3Key?: string;
-  sampleRate: string;
-  engine: string;
-  rvc: boolean;
-}
-
 export interface VoicePreset {
   temperature?: number;
   top_p?: number;
@@ -124,43 +115,6 @@ function buildForm(input: SpeakInput): FormData {
   return form;
 }
 
-export async function speak(input: SpeakInput): Promise<SpeakResult> {
-  const res = await fetch('/api/speak', { method: 'POST', body: buildForm(input) });
-  if (!res.ok) await fail(res);
-
-  // When the API archives to S3 it replies with JSON { id, url, key, ... } and
-  // the audio lives in the bucket; otherwise it streams the wav bytes back.
-  if (res.headers.get('content-type')?.includes('application/json')) {
-    const j = await res.json();
-    return {
-      audioUrl: j.url,
-      historyId: j.id,
-      s3Key: j.key,
-      sampleRate: j.sampleRate ?? '',
-      engine: j.engine ?? input.engine,
-      rvc: j.rvc === '1',
-    };
-  }
-
-  const blob = await res.blob();
-  return {
-    audioUrl: URL.createObjectURL(blob),
-    historyId: res.headers.get('x-history-id') ?? undefined,
-    sampleRate: res.headers.get('x-sample-rate') ?? '',
-    engine: res.headers.get('x-engine') ?? input.engine,
-    rvc: res.headers.get('x-rvc') === '1',
-  };
-}
-
-// ── streaming ────────────────────────────────────────────────────────────────
-export type StreamEvent =
-  | { type: 'start'; total: number; engine: string }
-  | { type: 'chunk'; index: number; total: number; text: string; sample_rate: number; audio: string }
-  | { type: 'chunk_error'; index: number; detail: string }
-  | { type: 'done'; total: number }
-  | { type: 'saved'; id: string; url: string | null }
-  | { type: 'error'; detail: string };
-
 /** Decode a base64 wav into an object URL the browser can play. */
 export function b64ToAudioUrl(b64: string): string {
   const bin = atob(b64);
@@ -169,8 +123,61 @@ export function b64ToAudioUrl(b64: string): string {
   return URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
 }
 
-export async function speakStream(input: SpeakInput, onEvent: (e: StreamEvent) => void): Promise<void> {
-  const res = await fetch('/api/speak-stream', { method: 'POST', body: buildForm(input) });
+// ── jobs (async queue) ────────────────────────────────────────────────────────
+
+export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
+
+export interface Job {
+  id: string;
+  status: JobStatus;
+  position: number;
+  total_chunks: number;
+  completed_chunks: number;
+  history_id: string | null;
+  url: string | null;
+  error: string | null;
+  created_at: string;
+  text?: string;
+  engine?: string;
+}
+
+// Events streamed from GET /api/jobs/:id/stream.
+export type JobEvent =
+  | { type: 'snapshot'; status: JobStatus; position: number; total_chunks: number; completed_chunks: number; url: string | null }
+  | { type: 'processing'; id: string }
+  | { type: 'start'; total: number; engine: string }
+  | { type: 'chunk'; index: number; total: number; text: string; audio: string }
+  | { type: 'completed'; id: string; history_id: string; url: string | null }
+  | { type: 'error'; detail: string }
+  | { type: 'cancelled' };
+
+/** Enqueue a generation. Returns the created job (status 'queued'). */
+export async function createJob(input: SpeakInput): Promise<Job> {
+  const res = await fetch('/api/jobs', { method: 'POST', body: buildForm(input) });
+  if (!res.ok) await fail(res);
+  return res.json();
+}
+
+export async function fetchJobs(limit = 50): Promise<Job[]> {
+  const res = await fetch(`/api/jobs?limit=${limit}`);
+  if (!res.ok) await fail(res);
+  return res.json();
+}
+
+export async function getJob(id: string): Promise<Job> {
+  const res = await fetch(`/api/jobs/${id}`);
+  if (!res.ok) await fail(res);
+  return res.json();
+}
+
+export async function cancelJob(id: string): Promise<void> {
+  const res = await fetch(`/api/jobs/${id}/cancel`, { method: 'POST' });
+  if (!res.ok) await fail(res);
+}
+
+/** Subscribe to a job's live progress over SSE until it reaches a terminal state. */
+export async function streamJob(id: string, onEvent: (e: JobEvent) => void): Promise<void> {
+  const res = await fetch(`/api/jobs/${id}/stream`);
   if (!res.ok || !res.body) await fail(res);
 
   const reader = res.body!.getReader();
@@ -182,7 +189,6 @@ export async function speakStream(input: SpeakInput, onEvent: (e: StreamEvent) =
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
 
-    // SSE frames are separated by a blank line.
     let sep: number;
     while ((sep = buffer.indexOf('\n\n')) !== -1) {
       const frame = buffer.slice(0, sep);
@@ -190,7 +196,7 @@ export async function speakStream(input: SpeakInput, onEvent: (e: StreamEvent) =
       const line = frame.split('\n').find((l) => l.startsWith('data:'));
       if (!line) continue;
       try {
-        onEvent(JSON.parse(line.slice(5).trim()) as StreamEvent);
+        onEvent(JSON.parse(line.slice(5).trim()) as JobEvent);
       } catch {
         /* ignore malformed frame */
       }

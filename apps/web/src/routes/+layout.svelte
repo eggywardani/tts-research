@@ -7,6 +7,7 @@
   const nav = [
     { href: '/', label: 'Studio', crumb: 'Synthesis', icon: 'star' },
     { href: '/voices', label: 'Voice Library', crumb: 'Voice Models', icon: 'user' },
+    { href: '/jobs', label: 'Job Monitor', crumb: 'Queue', icon: 'activity' },
     { href: '/history', label: 'History', crumb: 'Archives', icon: 'clock' },
   ] as const;
 
@@ -41,6 +42,8 @@
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg>
             {:else if item.icon === 'user'}
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3.2"/><path d="M6 19v-.5A5.5 5.5 0 0111.5 13h1A5.5 5.5 0 0118 18.5V19"/></svg>
+            {:else if item.icon === 'activity'}
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
             {:else}
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>
             {/if}

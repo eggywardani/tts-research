@@ -1,11 +1,23 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { isS3Enabled, uploadFile, downloadFile, presignUrl, S3_PREFIX } from './s3.js';
-import * as db from './db.js';
+import { isS3Enabled, presignUrl } from './s3.js';
 import { runMigrations } from './migrate.js';
 import { speakers } from './speakers.js';
 import { history } from './history.js';
-import { mergeWavs, wavDuration } from './wav.js';
+import {
+  createJob,
+  listJobs,
+  getJob,
+  queuePosition,
+  cancelJob,
+  subscribe,
+  wake,
+  recoverStaleJobs,
+  isTerminal,
+  type Job,
+  type JobRequest,
+} from './jobs.js';
+import { startWorkers } from './worker.js';
 
 const TTS_URL = process.env.TTS_URL ?? 'http://localhost:9000';
 const PORT = Number(process.env.PORT ?? 9001);
@@ -52,272 +64,155 @@ app.get('/api/engines', async (c) => {
 app.route('/api/speakers', speakers);
 app.route('/api', history);
 
-// ── Shared helpers ───────────────────────────────────────────────────────────
+// ── Job request parsing ──────────────────────────────────────────────────────
 
-// Numeric form fields we care about for history metadata + preset fill.
-function readParams(form: FormData): db.HistoryParams {
-  const num = (k: string) => {
-    const v = form.get(k);
-    return v == null || v === '' ? undefined : Number(v);
-  };
+function num(v: unknown): number | undefined {
+  return v == null || v === '' ? undefined : Number(v);
+}
+
+function toJobRequest(src: Record<string, unknown>): JobRequest {
+  const instruct = String(src.instruct ?? '').trim();
+  const speakerId = String(src.speaker_id ?? '').trim() || null;
   return {
-    temperature: num('temperature'),
-    top_p: num('top_p'),
-    cfg_scale: num('cfg_scale'),
-    seed: num('seed'),
-    use_rvc: String(form.get('use_rvc') ?? '') === 'true',
-    rvc_model: String(form.get('rvc_model') ?? '') || undefined,
-    rvc_pitch: num('rvc_pitch'),
-    ref_text: String(form.get('ref_text') ?? '') || undefined,
-    instruct: String(form.get('instruct') ?? '') || undefined,
-    mode: (String(form.get('instruct') ?? '') ? 'design' : 'clone'),
+    text: String(src.text ?? ''),
+    engine: String(src.engine ?? 'omnivoice') || 'omnivoice',
+    speaker_id: speakerId,
+    mode: speakerId ? 'clone' : instruct ? 'design' : 'clone',
+    instruct: instruct || undefined,
+    ref_text: String(src.ref_text ?? '') || undefined,
+    temperature: num(src.temperature),
+    top_p: num(src.top_p),
+    cfg_scale: num(src.cfg_scale),
+    seed: num(src.seed),
+    use_rvc: String(src.use_rvc ?? '') === 'true' || src.use_rvc === true,
+    rvc_model: String(src.rvc_model ?? '') || undefined,
+    rvc_pitch: num(src.rvc_pitch),
   };
 }
 
-// If the request names a saved speaker, load it, attach its stored clip as
-// `speaker_wav`, and fill ref_text from the speaker's engine config when the
-// caller didn't provide one. Mutates `form` in place. Returns the speaker (or
-// null when none / not found — the caller falls back to the raw request).
-async function applySpeaker(form: FormData): Promise<db.Speaker | null> {
-  const speakerId = String(form.get('speaker_id') ?? '').trim();
-  if (!speakerId) return null;
-
-  const speaker = await db.getSpeaker(speakerId);
-  if (!speaker) return null;
-
-  const engine = speaker.default_engine || 'omnivoice';
-  const cfg = speaker.engines?.[engine] ?? {};
-
-  // Fetch the reference clip from S3 and forward it as the cloning sample.
-  if (speaker.file_path) {
-    const bytes = await downloadFile(speaker.file_path);
-    const blob = new Blob([bytes], { type: 'audio/wav' });
-    form.set('speaker_wav', blob, speaker.original_filename || `${speaker.id}.wav`);
-    form.set('instruct', ''); // a saved speaker is always clone-mode
+// Accept either multipart/form-data (studio) or JSON (API consumers).
+async function parseRequest(c: any): Promise<JobRequest | null> {
+  const ct = c.req.header('content-type') ?? '';
+  try {
+    if (ct.includes('application/json')) {
+      return toJobRequest(await c.req.json());
+    }
+    const form = await c.req.formData();
+    const obj: Record<string, unknown> = {};
+    for (const [k, v] of form.entries()) obj[k] = v;
+    return toJobRequest(obj);
+  } catch {
+    return null;
   }
-
-  // ref_text: prefer the caller's, else the speaker's stored transcript.
-  if (!String(form.get('ref_text') ?? '').trim() && cfg.ref_text) {
-    form.set('ref_text', cfg.ref_text);
-  }
-  return speaker;
 }
 
-// Generate speech. Forwards the multipart form to the TTS service, optionally
-// swapping in a saved speaker's clip, archives the wav to S3 (when configured),
-// records a history row, and replies with the presigned URL (or the bytes when
-// S3 is off, so the playground still works locally).
-app.post('/api/speak', async (c) => {
-  let form: FormData;
-  try {
-    form = await c.req.formData();
-  } catch {
-    return c.json({ error: 'expected multipart/form-data' }, 400);
-  }
+function validate(req: JobRequest): string | null {
+  if (!req.text.trim()) return 'text is required';
+  if (!req.speaker_id && !req.instruct) return 'provide speaker_id (cloning) or instruct (voice design)';
+  return null;
+}
 
-  let speaker: db.Speaker | null = null;
-  try {
-    speaker = await applySpeaker(form);
-  } catch (err) {
-    return c.json({ error: 'failed to load saved speaker', detail: String(err) }, 502);
-  }
-
-  const params = readParams(form);
-  const text = String(form.get('text') ?? '');
-  const engine = String(form.get('engine') ?? 'omnivoice');
-  // speaker_id is ours — don't forward it to the TTS service.
-  form.delete('speaker_id');
-
-  try {
-    const res = await fetch(`${TTS_URL}/speak`, { method: 'POST', body: form });
-
-    if (!res.ok) {
-      const body = await res.text();
-      return c.json({ error: 'TTS generation failed', status: res.status, detail: body }, res.status as 400);
-    }
-
-    const meta = {
-      sampleRate: res.headers.get('x-sample-rate') ?? '',
-      engine: res.headers.get('x-engine') ?? engine,
-      chunks: res.headers.get('x-chunks') ?? '',
-      rvc: res.headers.get('x-rvc') ?? '0',
-    };
-
-    const audio = Buffer.from(await res.arrayBuffer());
-    const id = crypto.randomUUID();
-    let key: string | null = null;
-    let url: string | null = null;
-
-    if (isS3Enabled()) {
-      key = `${S3_PREFIX.outputs}${id}.wav`;
-      try {
-        await uploadFile(key, audio);
-        url = await presignUrl(key);
-      } catch (err) {
-        console.error('[api] S3 upload failed, keeping audio inline:', err);
-        key = null;
-      }
-    }
-
-    // Record history regardless of S3 (file_path stays null when archival is off).
+async function jobView(job: Job) {
+  let url: string | null = null;
+  if (job.file_path && isS3Enabled()) {
     try {
-      await db.addHistory({
-        id,
-        speaker_id: speaker?.id ?? null,
-        text,
-        engine: meta.engine,
-        params,
-        file_path: key,
-        sample_rate: meta.sampleRate,
-        rvc: meta.rvc === '1',
-        duration_seconds: wavDuration(audio),
-        chunks: [],
-      });
-    } catch (err) {
-      console.error('[api] failed to record history:', err);
+      url = await presignUrl(job.file_path);
+    } catch {
+      url = null;
     }
-
-    if (url) {
-      return c.json({ id, url, key, ...meta });
-    }
-
-    // No S3 — stream the bytes back like before (history still recorded).
-    return new Response(audio, {
-      status: 200,
-      headers: {
-        'content-type': res.headers.get('content-type') ?? 'audio/wav',
-        'x-history-id': id,
-        'x-sample-rate': meta.sampleRate,
-        'x-engine': meta.engine,
-        'x-chunks': meta.chunks,
-        'x-rvc': meta.rvc,
-      },
-    });
-  } catch (err) {
-    return c.json({ error: `TTS service unreachable at ${TTS_URL}`, detail: String(err) }, 502);
   }
+  return {
+    id: job.id,
+    status: job.status,
+    position: await queuePosition(job),
+    total_chunks: job.total_chunks,
+    completed_chunks: job.completed_chunks,
+    history_id: job.history_id,
+    url,
+    error: job.error,
+    created_at: job.created_at,
+    text: job.request?.text ?? '',
+    engine: job.request?.engine ?? 'omnivoice',
+  };
+}
+
+// ── Job endpoints ────────────────────────────────────────────────────────────
+
+// Enqueue a generation. Returns immediately with a job id; the worker pool runs
+// it when a GPU slot frees. Poll GET /api/jobs/:id or stream .../stream.
+app.post('/api/jobs', async (c) => {
+  const req = await parseRequest(c);
+  if (!req) return c.json({ error: 'expected multipart/form-data or JSON' }, 400);
+  const err = validate(req);
+  if (err) return c.json({ error: err }, 400);
+
+  const job = await createJob(req);
+  wake(); // nudge an idle worker
+  return c.json(await jobView(job), 202);
 });
 
-// Progressive generation. Streams the TTS service's SSE straight to the browser
-// so chunks can play as they're produced, while also collecting each chunk to
-// merge into one archived wav + a history row once generation completes.
-app.post('/api/speak-stream', async (c) => {
-  let form: FormData;
-  try {
-    form = await c.req.formData();
-  } catch {
-    return c.json({ error: 'expected multipart/form-data' }, 400);
-  }
+app.get('/api/jobs', async (c) => {
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
+  const jobs = await listJobs(limit);
+  return c.json(await Promise.all(jobs.map(jobView)));
+});
 
-  let speaker: db.Speaker | null = null;
-  try {
-    speaker = await applySpeaker(form);
-  } catch (err) {
-    return c.json({ error: 'failed to load saved speaker', detail: String(err) }, 502);
-  }
+app.get('/api/jobs/:id', async (c) => {
+  const job = await getJob(c.req.param('id'));
+  if (!job) return c.json({ error: 'not found' }, 404);
+  return c.json(await jobView(job));
+});
 
-  const params = readParams(form);
-  const text = String(form.get('text') ?? '');
-  const engine = String(form.get('engine') ?? 'omnivoice');
-  form.delete('speaker_id');
+app.post('/api/jobs/:id/cancel', async (c) => {
+  const ok = await cancelJob(c.req.param('id'));
+  if (!ok) return c.json({ error: 'not cancellable (already finished or missing)' }, 409);
+  return c.json({ ok: true });
+});
 
-  let upstream: Response;
-  try {
-    upstream = await fetch(`${TTS_URL}/speak-stream`, { method: 'POST', body: form });
-  } catch (err) {
-    return c.json({ error: `TTS service unreachable at ${TTS_URL}`, detail: String(err) }, 502);
-  }
-  if ((!upstream.ok && !upstream.body) || !upstream.body) {
-    const body = await upstream.text();
-    return c.json({ error: 'TTS stream failed', status: upstream.status, detail: body }, upstream.status as 400);
-  }
+// Live SSE progress. Emits the current snapshot, then queued/processing/start/
+// chunk/progress/completed/error/cancelled events until the job is terminal.
+app.get('/api/jobs/:id/stream', async (c) => {
+  const id = c.req.param('id');
+  const job = await getJob(id);
+  if (!job) return c.json({ error: 'not found' }, 404);
 
-  const id = crypto.randomUUID();
   const enc = new TextEncoder();
-  const dec = new TextDecoder();
-  const chunkAudio: Buffer[] = [];
-  const chunkMeta: db.HistoryChunk[] = [];
-  let sampleRate = '';
-  let usedRvc = String(form.get('use_rvc') ?? '') === 'true';
-
-  // Parse SSE `data:` events out of a growing buffer, collecting chunk audio.
-  const handleEvent = (jsonText: string) => {
-    let ev: any;
-    try {
-      ev = JSON.parse(jsonText);
-    } catch {
-      return;
-    }
-    if (ev.type === 'chunk' && typeof ev.audio === 'string') {
-      chunkAudio.push(Buffer.from(ev.audio, 'base64'));
-      chunkMeta.push({ index: ev.index, text: ev.text ?? '', status: 'completed' });
-      if (ev.sample_rate) sampleRate = String(ev.sample_rate);
-    } else if (ev.type === 'chunk_error') {
-      chunkMeta.push({ index: ev.index, text: '', status: 'failed' });
-    }
-  };
-
-  const reader = upstream.body.getReader();
+  const snapshot = await jobView(job);
+  let unsub: (() => void) | null = null;
 
   const stream = new ReadableStream({
-    async pull(controller) {
-      let buffered = '';
-      // Drain the whole upstream stream, forwarding bytes verbatim and parsing
-      // events as they complete (separated by a blank line).
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        controller.enqueue(value); // forward to the browser unchanged
-        buffered += dec.decode(value, { stream: true });
-        let sep: number;
-        while ((sep = buffered.indexOf('\n\n')) !== -1) {
-          const block = buffered.slice(0, sep);
-          buffered = buffered.slice(sep + 2);
-          for (const line of block.split('\n')) {
-            if (line.startsWith('data:')) handleEvent(line.slice(5).trim());
+    start(controller) {
+      const write = (type: string, data: unknown) => {
+        try {
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type, ...(data as object) })}\n\n`));
+        } catch {
+          /* stream closed */
+        }
+      };
+
+      write('snapshot', snapshot);
+
+      // Already finished before we connected — replay terminal + close.
+      if (isTerminal(job.status)) {
+        write(job.status, { id, url: snapshot.url, history_id: job.history_id, detail: job.error });
+        controller.close();
+        return;
+      }
+
+      unsub = subscribe(id, (event, data) => {
+        write(event, data);
+        if (event === 'completed' || event === 'error' || event === 'cancelled') {
+          unsub?.();
+          try {
+            controller.close();
+          } catch {
+            /* already closed */
           }
         }
-      }
-
-      // Generation finished — merge, archive, and record.
-      let url: string | null = null;
-      let key: string | null = null;
-      const merged = chunkAudio.length ? mergeWavs(chunkAudio, Number(sampleRate) || 24000) : null;
-
-      if (merged && isS3Enabled()) {
-        key = `${S3_PREFIX.outputs}${id}.wav`;
-        try {
-          await uploadFile(key, merged);
-          url = await presignUrl(key);
-        } catch (err) {
-          console.error('[api] stream S3 upload failed:', err);
-          key = null;
-        }
-      }
-
-      try {
-        await db.addHistory({
-          id,
-          speaker_id: speaker?.id ?? null,
-          text,
-          engine,
-          params,
-          file_path: key,
-          sample_rate: sampleRate,
-          rvc: usedRvc,
-          duration_seconds: merged ? wavDuration(merged) : null,
-          chunks: chunkMeta,
-        });
-      } catch (err) {
-        console.error('[api] failed to record stream history:', err);
-      }
-
-      // Tell the client where the archived result lives.
-      controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'saved', id, url })}\n\n`));
-      controller.close();
+      });
     },
     cancel() {
-      reader.cancel().catch(() => {});
+      unsub?.();
     },
   });
 
@@ -332,11 +227,61 @@ app.post('/api/speak-stream', async (c) => {
   });
 });
 
-// Run migrations before accepting traffic; fail loudly if the DB is unreachable.
+// Synchronous convenience: enqueue, wait for the job to finish, return the
+// result. Shares the same queue/concurrency as the async path — handy for simple
+// API consumers who want one blocking call. Pass async=1 to get 202 + job id.
+app.post('/api/speak', async (c) => {
+  const req = await parseRequest(c);
+  if (!req) return c.json({ error: 'expected multipart/form-data or JSON' }, 400);
+  const err = validate(req);
+  if (err) return c.json({ error: err }, 400);
+
+  const job = await createJob(req);
+  wake();
+
+  if (c.req.query('async') === '1') {
+    return c.json(await jobView(job), 202);
+  }
+
+  const finished = await awaitJob(job.id);
+  if (finished.status === 'failed') {
+    return c.json({ error: 'generation failed', detail: finished.error }, 502);
+  }
+  if (finished.status === 'cancelled') {
+    return c.json({ error: 'cancelled' }, 409);
+  }
+  return c.json(await jobView(finished));
+});
+
+// Resolve once a job reaches a terminal state (via the event bus, with an
+// initial check in case it finished before we subscribed).
+function awaitJob(id: string): Promise<Job> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const check = async () => {
+      const j = await getJob(id);
+      if (j && isTerminal(j.status) && !settled) {
+        settled = true;
+        unsub();
+        resolve(j);
+      }
+    };
+    const unsub = subscribe(id, (event) => {
+      if (event === 'completed' || event === 'error' || event === 'cancelled') check().catch(reject);
+    });
+    check().catch(reject);
+  });
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+
 try {
   await runMigrations();
+  const recovered = await recoverStaleJobs();
+  if (recovered) console.log(`[api] requeued ${recovered} stale job(s)`);
+  startWorkers();
 } catch (err) {
-  console.error('[api] migration failed — is DATABASE_URL reachable?', err);
+  console.error('[api] boot failed — is DATABASE_URL reachable?', err);
 }
 
 console.log(`[api] listening on http://localhost:${PORT}  (TTS_URL=${TTS_URL})`);

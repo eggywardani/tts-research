@@ -3,12 +3,12 @@
   import {
     fetchHealth,
     fetchSpeakers,
-    speak,
-    speakStream,
+    createJob,
+    streamJob,
+    cancelJob,
     b64ToAudioUrl,
     type SpeakInput,
-    type SpeakResult,
-    type StreamEvent,
+    type JobEvent,
     type Speaker,
   } from '$lib/api';
 
@@ -34,17 +34,18 @@
   let rvcModel = $state('');
   let rvcPitch = $state(0);
 
-  // generation mode
-  let stream = $state(true);
-
   // Settings come from the selected voice. In clone mode with no voice picked
   // (e.g. empty library), settings + generate are disabled.
   let settingsDisabled = $derived(mode === 'clone' && !selectedSpeakerId);
 
   let loading = $state(false);
   let error = $state('');
-  let result = $state<SpeakResult | null>(null);
   let health = $state<any>(null);
+
+  // job/queue state
+  let jobId = $state<string | null>(null);
+  let jobStatus = $state<string>('');
+  let queuePos = $state(0);
 
   // streaming state
   let progress = $state({ done: 0, total: 0 });
@@ -94,8 +95,10 @@
 
   function reset() {
     error = '';
-    result = null;
     savedUrl = null;
+    jobId = null;
+    jobStatus = '';
+    queuePos = 0;
     chunks.forEach((c) => URL.revokeObjectURL(c.url));
     chunks = [];
     progress = { done: 0, total: 0 };
@@ -148,28 +151,51 @@
 
     loading = true;
     try {
-      if (stream) {
-        await speakStream(input, (e: StreamEvent) => {
-          if (e.type === 'start') progress = { done: 0, total: e.total };
-          else if (e.type === 'chunk') {
-            chunks = [...chunks, { index: e.index, text: e.text, url: b64ToAudioUrl(e.audio) }];
-            progress = { done: chunks.length, total: e.total };
-            enqueue(e.index);
-          } else if (e.type === 'chunk_error') {
-            progress = { ...progress, done: progress.done + 1 };
-          } else if (e.type === 'saved') {
-            savedUrl = e.url;
-          } else if (e.type === 'error') {
-            error = e.detail;
-          }
-        });
-      } else {
-        result = await speak(input);
-      }
+      const job = await createJob(input);
+      jobId = job.id;
+      jobStatus = job.status;
+      queuePos = job.position;
+
+      // Stream live progress: queue position → chunks → completed.
+      await streamJob(job.id, (e: JobEvent) => {
+        if (e.type === 'snapshot') {
+          jobStatus = e.status;
+          queuePos = e.position;
+          if (e.total_chunks) progress = { done: e.completed_chunks, total: e.total_chunks };
+        } else if (e.type === 'processing') {
+          jobStatus = 'processing';
+          queuePos = 0;
+        } else if (e.type === 'start') {
+          jobStatus = 'processing';
+          progress = { done: 0, total: e.total };
+        } else if (e.type === 'chunk') {
+          chunks = [...chunks, { index: e.index, text: e.text, url: b64ToAudioUrl(e.audio) }];
+          progress = { done: chunks.length, total: e.total };
+          enqueue(e.index);
+        } else if (e.type === 'completed') {
+          jobStatus = 'completed';
+          savedUrl = e.url;
+        } else if (e.type === 'cancelled') {
+          jobStatus = 'cancelled';
+          error = 'Cancelled.';
+        } else if (e.type === 'error') {
+          jobStatus = 'failed';
+          error = e.detail;
+        }
+      });
     } catch (e) {
       error = String(e instanceof Error ? e.message : e);
     } finally {
       loading = false;
+    }
+  }
+
+  async function cancel() {
+    if (!jobId) return;
+    try {
+      await cancelJob(jobId);
+    } catch (e) {
+      error = String(e instanceof Error ? e.message : e);
     }
   }
 </script>
@@ -232,9 +258,14 @@
       {/if}
 
       <div class="action-bar">
-        <label class="toggle"><input type="checkbox" bind:checked={stream} /> stream & play chunks progressively</label>
+        {#if loading && (jobStatus === 'queued' || jobStatus === 'processing')}
+          <span class="job-status">
+            {#if jobStatus === 'queued'}⏳ Queued · position {queuePos}{:else}▶ Processing…{/if}
+          </span>
+          <button class="cancel" onclick={cancel}>Cancel</button>
+        {/if}
         <button class="go" onclick={generate} disabled={loading || settingsDisabled}>
-          {loading ? 'Generating…' : 'Generate speech'}
+          {loading ? 'Working…' : 'Generate speech'}
         </button>
       </div>
 
@@ -259,16 +290,6 @@
             <div class="meta"><b>Saved to history.</b> <a href={savedUrl}>full recording</a></div>
           </div>
         {/if}
-      {/if}
-
-      {#if result}
-        <div class="result">
-          <audio controls src={result.audioUrl}></audio>
-          <div class="meta">
-            {result.sampleRate ? result.sampleRate + ' Hz · ' : ''}{result.engine}{result.rvc ? ' · RVC' : ''}
-            <a href={result.audioUrl} download="omnivoice.wav">download</a>
-          </div>
-        </div>
       {/if}
     </section>
   </div>
@@ -359,9 +380,11 @@
   .slider::-moz-range-thumb { width: 18px; height: 18px; background: #2563eb; border: 2px solid #fff; border-radius: 50%; cursor: pointer; box-shadow: 0 1px 3px rgba(16,24,40,0.25); }
   .slider:disabled { cursor: not-allowed; }
   .slider:disabled::-webkit-slider-thumb { background: #9aa1af; }
-  .action-bar { display: flex; align-items: center; gap: 1rem; margin-top: 0.5rem; }
-  .action-bar .toggle { flex: 1; }
-  .action-bar .go { width: auto; flex: none; padding: 0.7rem 1.5rem; }
+  .action-bar { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.5rem; }
+  .job-status { flex: 1; font-size: 0.85rem; color: #475569; }
+  .action-bar .cancel { background: #fff; border: 1px solid #fecaca; color: #dc2626; border-radius: 9px; padding: 0.5rem 0.9rem; cursor: pointer; font-size: 0.85rem; }
+  .action-bar .cancel:hover { background: #fef2f2; }
+  .action-bar .go { width: auto; margin-left: auto; flex: none; padding: 0.7rem 1.5rem; }
   @media (max-width: 1024px) {
     .studio-layout { grid-template-columns: 1fr; }
     .settings { position: static; }
@@ -405,7 +428,6 @@
   .chunks .ctext { font-size: 0.8rem; color: #475569; }
   .chunks audio { grid-column: 2; width: 100%; height: 32px; }
   .result { margin-top: 1.25rem; }
-  .result audio { width: 100%; }
   .meta { margin-top: 0.4rem; font-size: 0.78rem; color: #6b7280; display: flex; gap: 0.75rem; }
   .meta a { color: #2563eb; }
 </style>

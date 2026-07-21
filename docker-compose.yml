@@ -44,6 +44,8 @@ services:
       - TTS_URL=http://tts:9000
       - API_TOKEN=${API_TOKEN:-}
       - DATABASE_URL=postgres://tts:${POSTGRES_PASSWORD:-tts}@postgres:5432/tts
+      # Worker-pool size — match GPU capacity (1 per GPU).
+      - TTS_CONCURRENCY=${TTS_CONCURRENCY:-1}
       # Optional S3 archival of generated audio (blank = keep audio inline).
       - S3_BUCKET=${S3_BUCKET:-}
       - AWS_REGION=${AWS_REGION:-us-east-1}
