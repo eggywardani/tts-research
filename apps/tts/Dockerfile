@@ -1,5 +1,6 @@
 # OmniVoice + RVC TTS service — needs a CUDA GPU at runtime.
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+# CUDA 12.8 so it supports Blackwell (RTX 50xx, sm_120).
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -8,8 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Torch first, pinned to the CUDA wheel index.
-RUN pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu121
+# Torch first, pinned to the CUDA 12.8 wheel index (Blackwell/sm_120 support).
+RUN pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
 
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
