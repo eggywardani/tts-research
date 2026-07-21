@@ -49,13 +49,26 @@ export interface Speaker {
   created_at: string;
 }
 
+export interface HistoryParams {
+  temperature?: number;
+  top_p?: number;
+  cfg_scale?: number;
+  seed?: number;
+  use_rvc?: boolean;
+  rvc_model?: string;
+  rvc_pitch?: number;
+  ref_text?: string;
+  instruct?: string;
+  mode?: 'clone' | 'design';
+}
+
 export interface HistoryItem {
   id: string;
   speaker_id: string | null;
   speaker_name: string | null;
   text: string;
   engine: string;
-  params: Record<string, unknown>;
+  params: HistoryParams;
   sample_rate: string;
   rvc: boolean;
   duration_seconds: number | null;

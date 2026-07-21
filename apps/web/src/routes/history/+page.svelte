@@ -75,6 +75,14 @@
             {#if it.sample_rate}· {it.sample_rate} Hz{/if}
             {#if it.duration_seconds}· {it.duration_seconds.toFixed(1)}s{/if}
           </div>
+          <div class="settings">
+            {#if it.params?.mode}<span class="chip">{it.params.mode}</span>{/if}
+            {#if it.params?.temperature != null}<span class="chip">temp {it.params.temperature}</span>{/if}
+            {#if it.params?.top_p != null}<span class="chip">top_p {it.params.top_p}</span>{/if}
+            {#if it.params?.cfg_scale != null}<span class="chip">cfg {it.params.cfg_scale}</span>{/if}
+            {#if it.params?.seed != null}<span class="chip">seed {it.params.seed}</span>{/if}
+            {#if it.params?.use_rvc}<span class="chip">rvc {it.params.rvc_model || 'on'}{it.params.rvc_pitch ? ` ${it.params.rvc_pitch >= 0 ? '+' : ''}${it.params.rvc_pitch}` : ''}</span>{/if}
+          </div>
           {#if it.url}
             <audio controls src={it.url}></audio>
           {:else}
@@ -101,6 +109,8 @@
   .top { display: flex; justify-content: space-between; gap: 0.75rem; align-items: flex-start; }
   .text { font-size: 0.9rem; color: #1a1f36; }
   .meta { font-size: 0.74rem; color: #8a93a6; margin: 0.35rem 0 0.5rem; }
+  .settings { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.6rem; }
+  .chip { font-size: 0.7rem; color: #475569; background: #eef1f6; border: 1px solid #e2e8f0; padding: 0.12rem 0.5rem; border-radius: 999px; }
   .list audio { width: 100%; height: 34px; }
   .del { background: #fff; border: 1px solid #e2e8f0; color: #64748b; border-radius: 8px; width: 26px; height: 26px; cursor: pointer; flex: none; }
   .del:hover { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
