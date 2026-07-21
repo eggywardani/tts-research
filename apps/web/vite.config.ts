@@ -1,8 +1,22 @@
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 
-// Note: /api and /health are proxied to the backend server-side in
-// hooks.server.ts (so it works in prod too, not just `vite dev`).
-export default defineConfig({
-  plugins: [sveltekit()],
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  const API_URL = env.API_URL ?? 'http://localhost:9001';
+  const API_TOKEN = env.API_TOKEN ?? '';
+
+  // Attach the backend token server-side so it never reaches browser JS.
+  const apiHeaders = API_TOKEN ? { 'x-api-token': API_TOKEN } : undefined;
+
+  return {
+    plugins: [sveltekit()],
+    server: {
+      proxy: {
+        // Frontend only ever calls same-origin /api + /health; Vite proxies to Bun.
+        '/api': { target: API_URL, changeOrigin: true, headers: apiHeaders },
+        '/health': { target: API_URL, changeOrigin: true },
+      },
+    },
+  };
 });

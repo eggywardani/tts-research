@@ -1,4 +1,4 @@
-# SvelteKit frontend (adapter-node -> build/index.js)
+# SvelteKit frontend (adapter-auto -> node build)
 FROM oven/bun:1.3-alpine AS build
 WORKDIR /app
 COPY package.json ./
@@ -12,5 +12,5 @@ COPY --from=build /app/build ./build
 COPY --from=build /app/package.json ./
 ENV PORT=5173
 EXPOSE 5173
-# adapter-node emits a node server at build/index.js
+# adapter-auto emits a node server at build/index.js
 CMD ["bun", "run", "build/index.js"]

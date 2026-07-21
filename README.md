@@ -66,6 +66,34 @@ proxies `/api` + `/health` to the API over the compose network, so it works the
 same in prod as in dev. On a GPU-less machine, run only `api` + `web` and set
 `TTS_URL` to a remote GPU host.
 
+### Deploy to vast.ai (native, no Docker)
+
+A vast.ai instance is itself a container, so running our `docker compose` inside
+it (docker-in-docker) is fiddly. Instead run the services **natively** on a
+**PyTorch (Vast)** template (ships CUDA + PyTorch — OmniVoice's heaviest dep):
+
+1. **Pick a GPU** — 16 GB VRAM is plenty for OmniVoice. Good picks from the search:
+   RTX 5070 Ti 16 GB (~$0.13/hr) for cheapest, or RTX 5090 32 GB (~$0.30/hr) for
+   headroom + faster download. (Blackwell cards need a recent torch — the PyTorch
+   template has it; if OmniVoice misbehaves, try a 4090/3090.)
+2. **Template:** PyTorch (Vast). **Disk:** bump container size to **~40 GB**
+   (torch + model weights). No need to open ports if you use the tunnel.
+3. **Rent**, then SSH in and:
+   ```bash
+   git clone https://github.com/eggywardani/tts-research.git
+   cd tts-research
+   AUTH_PASSWORD=yourpass API_TOKEN=sometoken TUNNEL_TOKEN=cf-token \
+     bash scripts/vast-run.sh
+   ```
+   The script installs bun + python deps (keeps the template's torch), starts
+   TTS + API + web, and — if `TUNNEL_TOKEN` is set — the Cloudflare Tunnel.
+   First run downloads the OmniVoice model (watch `tail -f /tmp/tts.log`).
+4. In Cloudflare, point one public hostname at `http://localhost:5173`
+   (see below). No tunnel? Use vast's port mapping to reach `:5173`.
+
+> Runs in **dev mode** (`bun run dev`, Vite proxies `/api`). For a hardened
+> `adapter-node` build behind the tunnel, use the Docker path above instead.
+
 ### Cloudflare Tunnel (GPU host)
 
 A rented GPU box (vast.ai etc.) usually has **no public inbound port**, so it's
