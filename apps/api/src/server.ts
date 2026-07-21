@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { isS3Enabled, uploadFile, presignUrl, S3_PREFIX } from './s3.js';
 
 const TTS_URL = process.env.TTS_URL ?? 'http://localhost:9000';
 const PORT = Number(process.env.PORT ?? 9001);
@@ -61,14 +62,47 @@ app.post('/api/speak', async (c) => {
       return c.json({ error: 'TTS generation failed', status: res.status, detail: body }, res.status as 400);
     }
 
+    const meta = {
+      sampleRate: res.headers.get('x-sample-rate') ?? '',
+      engine: res.headers.get('x-engine') ?? '',
+      chunks: res.headers.get('x-chunks') ?? '',
+      rvc: res.headers.get('x-rvc') ?? '',
+    };
+
+    // When S3 is configured, archive the wav and hand back a presigned URL
+    // instead of the bytes. Otherwise stream the audio straight through so the
+    // playground still works with no AWS account (best-effort archival).
+    if (isS3Enabled()) {
+      const audio = Buffer.from(await res.arrayBuffer());
+      const key = `${S3_PREFIX.outputs}${crypto.randomUUID()}.wav`;
+      try {
+        await uploadFile(key, audio);
+        const url = await presignUrl(key);
+        return c.json({ url, key, ...meta });
+      } catch (err) {
+        // Don't lose a successful generation to an S3 hiccup — fall back to bytes.
+        console.error('[api] S3 upload failed, returning audio inline:', err);
+        return new Response(audio, {
+          status: 200,
+          headers: {
+            'content-type': res.headers.get('content-type') ?? 'audio/wav',
+            'x-sample-rate': meta.sampleRate,
+            'x-engine': meta.engine,
+            'x-chunks': meta.chunks,
+            'x-rvc': meta.rvc,
+          },
+        });
+      }
+    }
+
     return new Response(res.body, {
       status: 200,
       headers: {
         'content-type': res.headers.get('content-type') ?? 'audio/wav',
-        'x-sample-rate': res.headers.get('x-sample-rate') ?? '',
-        'x-engine': res.headers.get('x-engine') ?? '',
-        'x-chunks': res.headers.get('x-chunks') ?? '',
-        'x-rvc': res.headers.get('x-rvc') ?? '',
+        'x-sample-rate': meta.sampleRate,
+        'x-engine': meta.engine,
+        'x-chunks': meta.chunks,
+        'x-rvc': meta.rvc,
       },
     });
   } catch (err) {

@@ -18,6 +18,7 @@ export interface SpeakInput {
 
 export interface SpeakResult {
   audioUrl: string;
+  s3Key?: string;
   sampleRate: string;
   engine: string;
   rvc: boolean;
@@ -64,6 +65,19 @@ export async function speak(input: SpeakInput): Promise<SpeakResult> {
       /* keep default */
     }
     throw new Error(detail);
+  }
+
+  // When the API archives to S3 it replies with JSON { url, key, ... } and the
+  // audio lives in the bucket; otherwise it streams the wav bytes back directly.
+  if (res.headers.get('content-type')?.includes('application/json')) {
+    const j = await res.json();
+    return {
+      audioUrl: j.url,
+      s3Key: j.key,
+      sampleRate: j.sampleRate ?? '',
+      engine: j.engine ?? input.engine,
+      rvc: j.rvc === '1',
+    };
   }
 
   const blob = await res.blob();
