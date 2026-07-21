@@ -519,13 +519,4 @@
   .progress { display: flex; align-items: center; gap: 0.6rem; margin-top: 1rem; font-size: 0.78rem; color: #6b7280; }
   .bar { flex: 1; height: 6px; background: #e6eaf1; border-radius: 999px; overflow: hidden; }
   .fill { height: 100%; background: #2563eb; transition: width 0.2s; }
-  .chunks { list-style: none; padding: 0; margin: 0.75rem 0 0; display: flex; flex-direction: column; gap: 0.5rem; }
-  .chunks li { display: grid; grid-template-columns: auto 1fr; gap: 0.4rem 0.6rem; align-items: center; background: #fafbfd; border: 1px solid #e6eaf1; border-radius: 9px; padding: 0.5rem 0.65rem; }
-  .chunks li.playing { border-color: #2563eb; background: #f5f8ff; }
-  .chunks .idx { grid-row: span 2; width: 1.4rem; height: 1.4rem; display: grid; place-items: center; background: #e6eaf1; border-radius: 999px; font-size: 0.72rem; color: #4f566b; }
-  .chunks .ctext { font-size: 0.8rem; color: #475569; }
-  .chunks audio { grid-column: 2; width: 100%; height: 32px; }
-  .result { margin-top: 1.25rem; }
-  .meta { margin-top: 0.4rem; font-size: 0.78rem; color: #6b7280; display: flex; gap: 0.75rem; }
-  .meta a { color: #2563eb; }
 </style>
