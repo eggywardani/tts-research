@@ -3,16 +3,18 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export const AUTH_COOKIE = 'auth_token';
 
-/** Configured passwords (comma-separated). Empty = auth disabled. */
+// Auth is mandatory — the dashboard always requires login. When AUTH_PASSWORD is
+// unset we fall back to a default so login/logout always work out of the box.
+// CHANGE THIS in production by setting AUTH_PASSWORD.
+const DEFAULT_PASSWORD = 'admin';
+
+/** Configured passwords (comma-separated), or the default when none are set. */
 export function getPasswords(): string[] {
-  return (env.AUTH_PASSWORD ?? '')
+  const configured = (env.AUTH_PASSWORD ?? '')
     .split(',')
     .map((p) => p.trim())
     .filter(Boolean);
-}
-
-export function authEnabled(): boolean {
-  return getPasswords().length > 0;
+  return configured.length > 0 ? configured : [DEFAULT_PASSWORD];
 }
 
 function secret(): string {

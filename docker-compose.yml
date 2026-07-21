@@ -21,6 +21,21 @@ services:
               count: 1
               capabilities: [gpu]
 
+  # Postgres — stores saved speakers + generation history.
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=tts
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-tts}
+      - POSTGRES_DB=tts
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U tts -d tts']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
     build: ./apps/api
     ports: ['9001:9001']
@@ -28,12 +43,17 @@ services:
       - PORT=9001
       - TTS_URL=http://tts:9000
       - API_TOKEN=${API_TOKEN:-}
+      - DATABASE_URL=postgres://tts:${POSTGRES_PASSWORD:-tts}@postgres:5432/tts
       # Optional S3 archival of generated audio (blank = keep audio inline).
       - S3_BUCKET=${S3_BUCKET:-}
       - AWS_REGION=${AWS_REGION:-us-east-1}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-    depends_on: [tts]
+    depends_on:
+      tts:
+        condition: service_started
+      postgres:
+        condition: service_healthy
 
   web:
     build: ./apps/web
@@ -57,3 +77,6 @@ services:
       - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
     depends_on: [web]
     restart: unless-stopped
+
+volumes:
+  pgdata:

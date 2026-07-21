@@ -1,12 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { AUTH_COOKIE, authEnabled, checkPassword, hashToken } from '$lib/server/auth';
-import type { Actions, PageServerLoad } from './$types';
-
-export const load: PageServerLoad = async () => {
-  // If auth is off, there's nothing to log into.
-  if (!authEnabled()) redirect(302, '/');
-  return {};
-};
+import { AUTH_COOKIE, checkPassword, hashToken } from '$lib/server/auth';
+import type { Actions } from './$types';
 
 export const actions: Actions = {
   default: async ({ request, cookies }) => {

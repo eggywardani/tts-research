@@ -14,14 +14,64 @@ export interface SpeakInput {
   rvcModel: string;
   rvcPitch: number;
   speakerWav: File | null;
+  speakerId?: string | null; // reuse a saved voice for cloning
 }
 
 export interface SpeakResult {
   audioUrl: string;
+  historyId?: string;
   s3Key?: string;
   sampleRate: string;
   engine: string;
   rvc: boolean;
+}
+
+export interface VoicePreset {
+  temperature?: number;
+  top_p?: number;
+  cfg_scale?: number;
+  seed?: number;
+  use_rvc?: boolean;
+  rvc_model?: string;
+  rvc_pitch?: number;
+}
+
+export interface Speaker {
+  id: string;
+  name: string;
+  language: string;
+  original_filename: string;
+  duration_seconds: number | null;
+  default_engine: string;
+  engines: Record<string, { preset?: VoicePreset; ref_text?: string }>;
+  voice_preset: VoicePreset;
+  audio_url: string | null;
+  created_at: string;
+}
+
+export interface HistoryItem {
+  id: string;
+  speaker_id: string | null;
+  speaker_name: string | null;
+  text: string;
+  engine: string;
+  params: Record<string, unknown>;
+  sample_rate: string;
+  rvc: boolean;
+  duration_seconds: number | null;
+  url: string | null;
+  created_at: string;
+}
+
+async function fail(res: Response): Promise<never> {
+  let detail = `HTTP ${res.status}`;
+  try {
+    const j = await res.json();
+    detail = j.detail ?? j.error ?? detail;
+  } catch {
+    /* keep default */
+  }
+  throw new Error(detail);
 }
 
 export async function fetchEngines() {
@@ -36,7 +86,7 @@ export async function fetchHealth() {
   return res.json();
 }
 
-export async function speak(input: SpeakInput): Promise<SpeakResult> {
+function buildForm(input: SpeakInput): FormData {
   const form = new FormData();
   form.set('text', input.text);
   form.set('engine', input.engine);
@@ -48,31 +98,30 @@ export async function speak(input: SpeakInput): Promise<SpeakResult> {
   form.set('rvc_model', input.rvcModel);
   form.set('rvc_pitch', String(input.rvcPitch));
 
-  if (input.mode === 'clone') {
+  if (input.speakerId) {
+    // Saved speaker → the API attaches the stored clip + ref_text server-side.
+    form.set('speaker_id', input.speakerId);
+    form.set('ref_text', input.refText);
+  } else if (input.mode === 'clone') {
     form.set('ref_text', input.refText);
     if (input.speakerWav) form.set('speaker_wav', input.speakerWav);
   } else {
     form.set('instruct', input.instruct);
   }
+  return form;
+}
 
-  const res = await fetch('/api/speak', { method: 'POST', body: form });
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try {
-      const j = await res.json();
-      detail = j.detail ?? j.error ?? detail;
-    } catch {
-      /* keep default */
-    }
-    throw new Error(detail);
-  }
+export async function speak(input: SpeakInput): Promise<SpeakResult> {
+  const res = await fetch('/api/speak', { method: 'POST', body: buildForm(input) });
+  if (!res.ok) await fail(res);
 
-  // When the API archives to S3 it replies with JSON { url, key, ... } and the
-  // audio lives in the bucket; otherwise it streams the wav bytes back directly.
+  // When the API archives to S3 it replies with JSON { id, url, key, ... } and
+  // the audio lives in the bucket; otherwise it streams the wav bytes back.
   if (res.headers.get('content-type')?.includes('application/json')) {
     const j = await res.json();
     return {
       audioUrl: j.url,
+      historyId: j.id,
       s3Key: j.key,
       sampleRate: j.sampleRate ?? '',
       engine: j.engine ?? input.engine,
@@ -83,6 +132,7 @@ export async function speak(input: SpeakInput): Promise<SpeakResult> {
   const blob = await res.blob();
   return {
     audioUrl: URL.createObjectURL(blob),
+    historyId: res.headers.get('x-history-id') ?? undefined,
     sampleRate: res.headers.get('x-sample-rate') ?? '',
     engine: res.headers.get('x-engine') ?? input.engine,
     rvc: res.headers.get('x-rvc') === '1',
@@ -95,27 +145,8 @@ export type StreamEvent =
   | { type: 'chunk'; index: number; total: number; text: string; sample_rate: number; audio: string }
   | { type: 'chunk_error'; index: number; detail: string }
   | { type: 'done'; total: number }
+  | { type: 'saved'; id: string; url: string | null }
   | { type: 'error'; detail: string };
-
-function buildForm(input: SpeakInput): FormData {
-  const form = new FormData();
-  form.set('text', input.text);
-  form.set('engine', input.engine);
-  form.set('temperature', String(input.temperature));
-  form.set('top_p', String(input.topP));
-  form.set('cfg_scale', String(input.cfgScale));
-  form.set('seed', String(input.seed));
-  form.set('use_rvc', String(input.useRvc));
-  form.set('rvc_model', input.rvcModel);
-  form.set('rvc_pitch', String(input.rvcPitch));
-  if (input.mode === 'clone') {
-    form.set('ref_text', input.refText);
-    if (input.speakerWav) form.set('speaker_wav', input.speakerWav);
-  } else {
-    form.set('instruct', input.instruct);
-  }
-  return form;
-}
 
 /** Decode a base64 wav into an object URL the browser can play. */
 export function b64ToAudioUrl(b64: string): string {
@@ -127,18 +158,9 @@ export function b64ToAudioUrl(b64: string): string {
 
 export async function speakStream(input: SpeakInput, onEvent: (e: StreamEvent) => void): Promise<void> {
   const res = await fetch('/api/speak-stream', { method: 'POST', body: buildForm(input) });
-  if (!res.ok || !res.body) {
-    let detail = `HTTP ${res.status}`;
-    try {
-      const j = await res.json();
-      detail = j.detail ?? j.error ?? detail;
-    } catch {
-      /* keep default */
-    }
-    throw new Error(detail);
-  }
+  if (!res.ok || !res.body) await fail(res);
 
-  const reader = res.body.getReader();
+  const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
 
@@ -161,4 +183,63 @@ export async function speakStream(input: SpeakInput, onEvent: (e: StreamEvent) =
       }
     }
   }
+}
+
+// ── speakers ─────────────────────────────────────────────────────────────────
+
+export async function fetchSpeakers(): Promise<Speaker[]> {
+  const res = await fetch('/api/speakers');
+  if (!res.ok) await fail(res);
+  return res.json();
+}
+
+export async function createSpeaker(data: {
+  name: string;
+  language: string;
+  refText?: string;
+  audio: File;
+  preset?: VoicePreset;
+}): Promise<Speaker> {
+  const form = new FormData();
+  form.set('name', data.name);
+  form.set('language', data.language);
+  if (data.refText) form.set('ref_text', data.refText);
+  if (data.preset) form.set('voice_preset', JSON.stringify(data.preset));
+  form.set('audio', data.audio);
+  const res = await fetch('/api/speakers', { method: 'POST', body: form });
+  if (!res.ok) await fail(res);
+  return res.json();
+}
+
+export async function updateSpeaker(id: string, updates: Partial<Pick<Speaker, 'name' | 'language' | 'voice_preset'>>): Promise<Speaker> {
+  const res = await fetch(`/api/speakers/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) await fail(res);
+  return res.json();
+}
+
+export async function deleteSpeaker(id: string): Promise<void> {
+  const res = await fetch(`/api/speakers/${id}`, { method: 'DELETE' });
+  if (!res.ok) await fail(res);
+}
+
+// ── history ──────────────────────────────────────────────────────────────────
+
+export async function fetchHistory(limit = 50): Promise<HistoryItem[]> {
+  const res = await fetch(`/api/history?limit=${limit}`);
+  if (!res.ok) await fail(res);
+  return res.json();
+}
+
+export async function deleteHistory(id: string): Promise<void> {
+  const res = await fetch(`/api/history/${id}`, { method: 'DELETE' });
+  if (!res.ok) await fail(res);
+}
+
+export async function clearHistory(): Promise<void> {
+  const res = await fetch('/api/history', { method: 'DELETE' });
+  if (!res.ok) await fail(res);
 }
