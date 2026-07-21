@@ -17,6 +17,6 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV PORT=9000
-EXPOSE 9000
+ENV PORT=9001
+EXPOSE 9001
 CMD ["python3", "main.py"]
