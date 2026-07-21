@@ -259,7 +259,7 @@ export async function createSpeaker(data: {
   return res.json();
 }
 
-export async function updateSpeaker(id: string, updates: Partial<Pick<Speaker, 'name' | 'language' | 'voice_preset'>>): Promise<Speaker> {
+export async function updateSpeaker(id: string, updates: Partial<Pick<Speaker, 'name' | 'language' | 'voice_preset' | 'engines' | 'default_engine'>>): Promise<Speaker> {
   const res = await fetch(`/api/speakers/${id}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },

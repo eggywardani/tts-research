@@ -34,6 +34,7 @@
   let editId = $state<string | null>(null);
   let eName = $state('');
   let eLang = $state('en');
+  let eRefText = $state('');
   let eTemp = $state(0.7);
   let eTopP = $state(0.9);
   let eCfg = $state(2.0);
@@ -159,6 +160,8 @@
     eUseRvc = p.use_rvc ?? false;
     eRvcModel = p.rvc_model ?? '';
     eRvcPitch = p.rvc_pitch ?? 0;
+    const engine = s.default_engine || 'omnivoice';
+    eRefText = s.engines?.[engine]?.ref_text ?? '';
   }
 
   async function saveEdit(id: string) {
@@ -168,8 +171,20 @@
       temperature: eTemp, top_p: eTopP, cfg_scale: eCfg, seed: eSeed,
       use_rvc: eUseRvc, rvc_model: eRvcModel, rvc_pitch: eRvcPitch,
     };
+    const current = speakers.find((s) => s.id === id);
+    const engine = current?.default_engine || 'omnivoice';
+    // Persist the reference transcript into the engine config (what generation uses).
+    const engines = {
+      ...(current?.engines ?? {}),
+      [engine]: { ...(current?.engines?.[engine] ?? {}), preset, ref_text: eRefText.trim() },
+    };
     try {
-      const updated = await updateSpeaker(id, { name: eName.trim() || 'Voice', language: eLang.trim() || 'en', voice_preset: preset });
+      const updated = await updateSpeaker(id, {
+        name: eName.trim() || 'Voice',
+        language: eLang.trim() || 'en',
+        voice_preset: preset,
+        engines,
+      });
       speakers = speakers.map((s) => (s.id === id ? updated : s));
       editId = null;
     } catch (e) {
@@ -188,6 +203,30 @@
       error = String(e instanceof Error ? e.message : e);
     }
   }
+
+  // ── Mini preview player (one at a time; audio only loads on play). ──
+  let playingId = $state<string | null>(null);
+  let paused = $state(true);
+  let curTime = $state(0);
+  let dur = $state(0);
+  let playerEl: HTMLAudioElement | null = null;
+
+  function togglePlay(s: Speaker) {
+    if (!playerEl || !s.audio_url) return;
+    if (playingId === s.id) {
+      playerEl.paused ? playerEl.play() : playerEl.pause();
+      return;
+    }
+    playerEl.src = s.audio_url; // fetched from S3 only now, on demand
+    curTime = 0;
+    dur = 0;
+    playerEl.play().then(() => (playingId = s.id)).catch(() => {});
+  }
+  const fmt = (s: number) => {
+    if (!isFinite(s) || s < 0) return '0:00';
+    const m = Math.floor(s / 60);
+    return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  };
 </script>
 
 <main>
@@ -258,11 +297,21 @@
       {#each speakers as s (s.id)}
         <li>
           <div class="head">
+            {#if s.audio_url}
+              <button class="play-btn" class:playing={playingId === s.id && !paused} onclick={() => togglePlay(s)} aria-label="play">
+                {playingId === s.id && !paused ? '❚❚' : '▶'}
+              </button>
+            {/if}
             <div class="info">
               <div class="name">{s.name} <span class="tag">{s.language}</span></div>
               <div class="file">{s.original_filename}</div>
             </div>
-            {#if s.audio_url}<audio controls src={s.audio_url}></audio>{:else}<span class="muted small">no preview</span>{/if}
+            {#if playingId === s.id}
+              <div class="pwrap">
+                <div class="pbar"><div class="pfill" style="width:{dur ? (curTime / dur) * 100 : 0}%"></div></div>
+                <span class="ptime">{fmt(curTime)} / {fmt(dur)}</span>
+              </div>
+            {/if}
             <button class="edit" class:on={editId === s.id} onclick={() => toggleEdit(s)}>Settings</button>
             <button class="del" onclick={() => remove(s)} aria-label="delete">✕</button>
           </div>
@@ -273,6 +322,10 @@
                 <label class="field grow"><span>Name</span><input bind:value={eName} /></label>
                 <label class="field lang"><span>Language</span><input bind:value={eLang} /></label>
               </div>
+
+              <label class="field"><span>Reference transcript (what the clip says — improves cloning)</span>
+                <input bind:value={eRefText} placeholder="e.g. Hello, this is a test of my voice." />
+              </label>
 
               <div class="params">
                 {@render param('temperature', eTemp, 0.1, 1.5, 0.05, (v) => (eTemp = v))}
@@ -304,6 +357,18 @@
     </ul>
   {/if}
 </main>
+
+<!-- one shared player: audio is fetched from S3 only when the user hits play -->
+<audio
+  bind:this={playerEl}
+  preload="none"
+  onplay={() => (paused = false)}
+  onpause={() => (paused = true)}
+  ontimeupdate={() => { if (playerEl) curTime = playerEl.currentTime; }}
+  onloadedmetadata={() => { if (playerEl) dur = playerEl.duration || 0; }}
+  onended={() => { playingId = null; paused = true; curTime = 0; }}
+  hidden
+></audio>
 
 {#snippet param(label: string, value: number, min: number, max: number, step: number, set: (v: number) => void)}
   <div class="param">
@@ -357,14 +422,20 @@
   .go:disabled { opacity: 0.6; }
   .error { color: #dc2626; font-size: 0.85rem; margin-top: 0.6rem; }
   .muted { color: #8a93a6; }
-  .small { font-size: 0.78rem; }
   .list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
   .list li { background: #fff; border: 1px solid #e6eaf1; border-radius: 11px; padding: 0.7rem 0.9rem; box-shadow: 0 1px 2px rgba(16,24,40,0.03); }
-  .head { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 0.75rem; }
+  .head { display: flex; align-items: center; gap: 0.85rem; }
+  .info { flex: 1; min-width: 0; }
+  .play-btn { flex: none; width: 38px; height: 38px; border-radius: 50%; border: none; background: #2563eb; color: #fff; font-size: 0.8rem; cursor: pointer; display: grid; place-items: center; line-height: 1; }
+  .play-btn:hover { background: #1d4ed8; }
+  .play-btn.playing { background: #1e40af; }
+  .pwrap { display: flex; align-items: center; gap: 0.5rem; flex: none; }
+  .pbar { width: 130px; height: 5px; background: #e6eaf1; border-radius: 999px; overflow: hidden; }
+  .pfill { height: 100%; background: #2563eb; }
+  .ptime { font-size: 0.72rem; color: #64748b; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .info .name { font-weight: 600; color: #1a1f36; }
   .tag { font-size: 0.7rem; color: #4f566b; background: #eef1f6; padding: 0.1rem 0.45rem; border-radius: 999px; margin-left: 0.3rem; }
-  .info .file { font-size: 0.75rem; color: #8a93a6; }
-  .list audio { height: 34px; }
+  .info .file { font-size: 0.75rem; color: #8a93a6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .edit { background: #fff; border: 1px solid #e2e8f0; color: #475569; border-radius: 8px; padding: 0.35rem 0.7rem; cursor: pointer; font-size: 0.8rem; font-weight: 500; white-space: nowrap; }
   .edit:hover, .edit.on { background: #eef4ff; border-color: #cddcff; color: #2563eb; }
   .del { background: #fff; border: 1px solid #e2e8f0; color: #64748b; border-radius: 8px; width: 28px; height: 28px; cursor: pointer; }
