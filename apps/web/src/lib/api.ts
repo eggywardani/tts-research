@@ -183,6 +183,26 @@ export async function cancelJob(id: string): Promise<void> {
   if (!res.ok) await fail(res);
 }
 
+/**
+ * Poll a job until it reaches a terminal state — the resilient fallback for when
+ * the live SSE stream drops (common behind Cloudflare Tunnel / proxies). Tolerates
+ * transient fetch failures; only gives up after several consecutive errors.
+ */
+export async function pollJob(id: string, onUpdate: (j: Job) => void, intervalMs = 2000): Promise<Job> {
+  let consecutiveErrors = 0;
+  for (;;) {
+    try {
+      const j = await getJob(id);
+      consecutiveErrors = 0;
+      onUpdate(j);
+      if (j.status === 'completed' || j.status === 'failed' || j.status === 'cancelled') return j;
+    } catch (e) {
+      if (++consecutiveErrors >= 5) throw e;
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
 /** Subscribe to a job's live progress over SSE until it reaches a terminal state. */
 export async function streamJob(id: string, onEvent: (e: JobEvent) => void): Promise<void> {
   const res = await fetch(`/api/jobs/${id}/stream`);

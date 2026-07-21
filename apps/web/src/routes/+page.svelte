@@ -6,6 +6,7 @@
     fetchSpeakers,
     createJob,
     streamJob,
+    pollJob,
     cancelJob,
     b64ToAudioUrl,
     type SpeakInput,
@@ -145,47 +146,72 @@
     pump();
   }
 
+  function onDone(status: string, url: string | null, historyId: string | null, detail?: string) {
+    jobStatus = status;
+    if (status === 'completed') {
+      savedUrl = url;
+      // Jump straight to the result detail, like audio-processor-llm.
+      goto(`/history?focus=${historyId ?? jobId}`);
+    } else if (status === 'cancelled') {
+      error = 'Cancelled.';
+    } else if (status === 'failed') {
+      error = detail || 'generation failed';
+    }
+  }
+
   async function generate() {
     reset();
     const input = validate();
     if (!input) return;
 
     loading = true;
+    let settled = false;
     try {
       const job = await createJob(input);
       jobId = job.id;
       jobStatus = job.status;
       queuePos = job.position;
 
-      // Stream live progress: queue position → chunks → completed.
-      await streamJob(job.id, (e: JobEvent) => {
-        if (e.type === 'snapshot') {
-          jobStatus = e.status;
-          queuePos = e.position;
-          if (e.total_chunks) progress = { done: e.completed_chunks, total: e.total_chunks };
-        } else if (e.type === 'processing') {
-          jobStatus = 'processing';
-          queuePos = 0;
-        } else if (e.type === 'start') {
-          jobStatus = 'processing';
-          progress = { done: 0, total: e.total };
-        } else if (e.type === 'chunk') {
-          chunks = [...chunks, { index: e.index, text: e.text, url: b64ToAudioUrl(e.audio) }];
-          progress = { done: chunks.length, total: e.total };
-          enqueue(e.index);
-        } else if (e.type === 'completed') {
-          jobStatus = 'completed';
-          savedUrl = e.url;
-          // Jump straight to the result detail, like audio-processor-llm.
-          goto(`/history?focus=${e.history_id}`);
-        } else if (e.type === 'cancelled') {
-          jobStatus = 'cancelled';
-          error = 'Cancelled.';
-        } else if (e.type === 'error') {
-          jobStatus = 'failed';
-          error = e.detail;
+      try {
+        // Preferred path: live SSE (queue position → chunks → completed).
+        await streamJob(job.id, (e: JobEvent) => {
+          if (e.type === 'snapshot') {
+            jobStatus = e.status;
+            queuePos = e.position;
+            if (e.total_chunks) progress = { done: e.completed_chunks, total: e.total_chunks };
+          } else if (e.type === 'processing') {
+            jobStatus = 'processing';
+            queuePos = 0;
+          } else if (e.type === 'start') {
+            jobStatus = 'processing';
+            progress = { done: 0, total: e.total };
+          } else if (e.type === 'chunk') {
+            chunks = [...chunks, { index: e.index, text: e.text, url: b64ToAudioUrl(e.audio) }];
+            progress = { done: chunks.length, total: e.total };
+            enqueue(e.index);
+          } else if (e.type === 'completed') {
+            settled = true;
+            onDone('completed', e.url, e.history_id);
+          } else if (e.type === 'cancelled') {
+            settled = true;
+            onDone('cancelled', null, null);
+          } else if (e.type === 'error') {
+            settled = true;
+            onDone('failed', null, null, e.detail);
+          }
+        });
+      } catch (sseErr) {
+        // SSE dropped (common behind Cloudflare Tunnel). The job still runs in the
+        // background — fall back to polling until it reaches a terminal state.
+        if (!settled) {
+          const final = await pollJob(job.id, (j) => {
+            jobStatus = j.status;
+            queuePos = j.position;
+            if (j.total_chunks) progress = { done: j.completed_chunks, total: j.total_chunks };
+          });
+          onDone(final.status, final.url, final.history_id ?? final.id, final.error ?? undefined);
         }
-      });
+      }
     } catch (e) {
       error = String(e instanceof Error ? e.message : e);
     } finally {
