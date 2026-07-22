@@ -44,10 +44,17 @@ _NO_CHUNK_LANGS = {
 }
 
 # ── Patterns ─────────────────────────────────────────────────────────────────
-# Split at ". "/"! "/"? "/"؟ " only when followed by an uppercase Latin letter
-# (\p{Lu}), a non-cased letter (\p{Lo} — Arabic/Hebrew/Hindi/CJK), or "[" (a tag).
-# Lowercase Latin is excluded to avoid splitting abbreviations like "U.S.A. is".
-_SENTENCE_TERMINATORS = re.compile(r"(?<=[.!?…؟])\s+(?=[\p{Lu}\p{Lo}\[])")
+# Split at a sentence terminator + space when the next token is a letter (any
+# case) or a "[" tag. We allow a lowercase start — sloppy transcripts often write
+# "...requirement. remember that..." — but guard against real abbreviations
+# (single letters like "U.S.A." and titles like "Dr.") so they don't split.
+_ABBREV = (
+    r"(?:[A-Za-z]|Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Vs|Etc|Inc|Ltd|Co|No|Fig|Rev|Gen|Sen|Gov|Lt|Sgt|Capt)"
+)
+_SENTENCE_TERMINATORS = re.compile(rf"(?<!\b{_ABBREV}\.)(?<=[.!?…؟])\s+(?=[\p{{L}}\[])")
+# Clause boundaries used only to break an over-long single sentence at a natural
+# pause: after a comma/semicolon/colon, or before a coordinating conjunction.
+_CLAUSE_SPLIT = re.compile(r"(?<=[,;:])\s+|\s+(?=(?:and|but|or|nor|yet|so|because)\b)", re.IGNORECASE)
 # Hard boundary for non-Arabic text: some TTS tokenizers truncate at ASCII ":"/";".
 _COLON_HARD_TERMINATORS = re.compile(r"(?<=[:;])\s+")
 # For Arabic-script text every sentence terminator is a hard boundary.
@@ -158,14 +165,44 @@ def _split_segment_by_sentences(segment: str, max_len: int) -> List[str]:
         if len(sent) <= max_len:
             buf = sent
         else:
-            # Sentence itself exceeds the budget — word-wrap as a last resort.
-            wrapped = _word_wrap(sent, max_len)
+            # Sentence exceeds the budget — break it at clause boundaries so each
+            # piece ends at a natural pause instead of an arbitrary word.
+            wrapped = _split_long_sentence(sent, max_len)
             chunks.extend(wrapped[:-1])
             buf = wrapped[-1] if wrapped else ""
 
     if buf:
         chunks.append(buf)
     return chunks
+
+
+def _split_long_sentence(sent: str, max_len: int) -> List[str]:
+    """Break an over-long sentence at clause boundaries (commas, ;, :, and
+    coordinating conjunctions), packing clauses up to the budget so each chunk
+    ends at a natural pause. Falls back to word wrapping a clause that is itself
+    longer than the budget."""
+    units = [u.strip() for u in _CLAUSE_SPLIT.split(sent) if u and u.strip()]
+    if len(units) <= 1:
+        return _word_wrap(sent, max_len)
+
+    out: List[str] = []
+    buf = ""
+    for unit in units:
+        candidate = f"{buf} {unit}" if buf else unit
+        if len(candidate) <= max_len:
+            buf = candidate
+            continue
+        if buf:
+            out.append(buf)
+        if len(unit) <= max_len:
+            buf = unit
+        else:
+            wrapped = _word_wrap(unit, max_len)
+            out.extend(wrapped[:-1])
+            buf = wrapped[-1] if wrapped else ""
+    if buf:
+        out.append(buf)
+    return out
 
 
 def _word_wrap(sent: str, max_len: int) -> List[str]:
