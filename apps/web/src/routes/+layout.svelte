@@ -56,6 +56,13 @@
             <span>{item.label}</span>
           </a>
         {/each}
+
+        <!-- Served by the API (Scalar UI); opens standalone, so a plain new-tab link. -->
+        <a href="/docs" class="nav-link" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4a2 2 0 012-2h9l5 5v13a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h4"/></svg>
+          <span>API Docs</span>
+          <svg class="ext" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+        </a>
       </nav>
 
       <div class="side-footer">
@@ -122,6 +129,7 @@
   .nav-link:hover { background: #f4f7fb; color: #1a1f36; }
   .nav-link.active { background: #eef4ff; color: #2563eb; }
   .nav-link svg { flex-shrink: 0; }
+  .nav-link .ext { margin-left: auto; opacity: 0.45; }
 
   .side-footer { padding: 1rem 1.4rem 0; border-top: 1px solid #eef1f6; margin-top: 0.75rem; }
   .status { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: #697386; }

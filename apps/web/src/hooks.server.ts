@@ -37,11 +37,15 @@ async function proxyToApi(request: Request, pathname: string, search: string): P
 export const handle: Handle = async ({ event, resolve }) => {
   const { pathname, search } = event.url;
   const isApi = pathname === '/api' || pathname.startsWith('/api/');
+  // The API also serves its docs (Scalar UI + OpenAPI spec). Proxy them so the
+  // dashboard can link to /docs same-origin, behind the same login gate.
+  const isDocs = pathname === '/docs' || pathname === '/openapi.json';
 
   const authed = isValidToken(event.cookies.get(AUTH_COOKIE));
 
-  if (isApi) {
+  if (isApi || isDocs) {
     if (!authed) {
+      if (isDocs) redirect(302, '/login');
       return new Response(JSON.stringify({ error: 'unauthorized' }), {
         status: 401,
         headers: { 'content-type': 'application/json' },
