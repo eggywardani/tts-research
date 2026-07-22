@@ -175,15 +175,60 @@ export async function deleteSpeaker(id: string): Promise<void> {
 
 // ── History ──────────────────────────────────────────────────────────────────
 
-export async function getHistory(limit = 50): Promise<HistoryRecord[]> {
-  const rows = (await sql`
-    SELECT h.*, s.name AS speaker_name
-    FROM history h
-    LEFT JOIN speakers s ON s.id = h.speaker_id
-    ORDER BY h.created_at DESC
-    LIMIT ${limit}
-  `) as any[];
+export interface HistoryFilters {
+  limit?: number;
+  speaker_id?: string | null;
+  engine?: string | null;
+  search?: string | null;
+  from_date?: string | null; // YYYY-MM-DD (inclusive)
+  to_date?: string | null; // YYYY-MM-DD (inclusive — whole day)
+}
+
+export async function getHistory(filters: HistoryFilters = {}): Promise<HistoryRecord[]> {
+  const limit = Math.min(Math.max(Number(filters.limit ?? 50) || 50, 1), 500);
+
+  // Build a parameterized WHERE from whichever filters are set.
+  const conds: string[] = [];
+  const params: any[] = [];
+  const add = (frag: string, val: unknown) => {
+    params.push(val);
+    conds.push(frag.replace('?', `$${params.length}`));
+  };
+  if (filters.speaker_id) add('h.speaker_id = ?', filters.speaker_id);
+  if (filters.engine) add('h.engine = ?', filters.engine);
+  if (filters.search) add('h.text ILIKE ?', `%${filters.search}%`);
+  if (filters.from_date) add('h.created_at >= ?::date', filters.from_date);
+  if (filters.to_date) add('h.created_at < (?::date + 1)', filters.to_date); // include the whole end day
+
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  params.push(limit);
+  const rows = (await sql.unsafe(
+    `SELECT h.*, s.name AS speaker_name
+       FROM history h
+       LEFT JOIN speakers s ON s.id = h.speaker_id
+       ${where}
+       ORDER BY h.created_at DESC
+       LIMIT $${params.length}`,
+    params,
+  )) as any[];
   return rows.map(normHistory);
+}
+
+// Distinct values for the history filter dropdowns.
+export async function getHistoryFilters(): Promise<{ speakers: { id: string; name: string }[]; engines: string[] }> {
+  const speakerRows = (await sql`
+    SELECT DISTINCT h.speaker_id AS id, s.name AS name
+    FROM history h JOIN speakers s ON s.id = h.speaker_id
+    WHERE h.speaker_id IS NOT NULL
+    ORDER BY s.name
+  `) as any[];
+  const engineRows = (await sql`
+    SELECT DISTINCT engine FROM history WHERE engine <> '' ORDER BY engine
+  `) as any[];
+  return {
+    speakers: speakerRows.map((r) => ({ id: r.id, name: r.name })),
+    engines: engineRows.map((r) => r.engine),
+  };
 }
 
 export async function getHistoryItem(id: string): Promise<HistoryRecord | null> {

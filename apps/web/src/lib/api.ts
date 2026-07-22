@@ -270,8 +270,36 @@ export async function deleteSpeaker(id: string): Promise<void> {
 
 // ── history ──────────────────────────────────────────────────────────────────
 
-export async function fetchHistory(limit = 50): Promise<HistoryItem[]> {
-  const res = await fetch(`/api/history?limit=${limit}`);
+export interface HistoryFilters {
+  limit?: number;
+  speaker_id?: string;
+  engine?: string;
+  search?: string;
+  from?: string; // YYYY-MM-DD
+  to?: string; // YYYY-MM-DD
+}
+
+export interface HistoryFilterOptions {
+  speakers: { id: string; name: string }[];
+  engines: string[];
+}
+
+export async function fetchHistory(filters: HistoryFilters = {}): Promise<HistoryItem[]> {
+  const p = new URLSearchParams();
+  p.set('limit', String(filters.limit ?? 100));
+  if (filters.speaker_id) p.set('speaker_id', filters.speaker_id);
+  if (filters.engine) p.set('engine', filters.engine);
+  if (filters.search) p.set('search', filters.search);
+  if (filters.from) p.set('from', filters.from);
+  if (filters.to) p.set('to', filters.to);
+  const res = await fetch(`/api/history?${p.toString()}`);
+  if (!res.ok) await fail(res);
+  return res.json();
+}
+
+/** Distinct voices + engines present in history, for the filter dropdowns. */
+export async function fetchHistoryFilters(): Promise<HistoryFilterOptions> {
+  const res = await fetch('/api/history/filters');
   if (!res.ok) await fail(res);
   return res.json();
 }

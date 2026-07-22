@@ -266,8 +266,14 @@ export function getOpenApiSpec() {
         get: {
           tags: ['History'],
           summary: 'List generations',
+          description: 'Optionally filter by voice, engine, free-text, and date range.',
           parameters: [
-            { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 200, default: 50 } },
+            { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 500, default: 100 } },
+            { name: 'speaker_id', in: 'query', required: false, schema: { type: 'string', format: 'uuid' }, description: 'Filter by voice.' },
+            { name: 'engine', in: 'query', required: false, schema: { type: 'string' } },
+            { name: 'search', in: 'query', required: false, schema: { type: 'string' }, description: 'Case-insensitive substring of the text.' },
+            { name: 'from', in: 'query', required: false, schema: { type: 'string', format: 'date' }, description: 'Inclusive start date (YYYY-MM-DD).' },
+            { name: 'to', in: 'query', required: false, schema: { type: 'string', format: 'date' }, description: 'Inclusive end date (YYYY-MM-DD).' },
           ],
           responses: {
             '200': { description: 'History', content: { 'application/json': { schema: { type: 'array', items: ref('HistoryItem') } } } },
@@ -278,6 +284,28 @@ export function getOpenApiSpec() {
           summary: 'Clear all history',
           responses: {
             '200': { description: 'Cleared', content: { 'application/json': { schema: { type: 'object', properties: { ok: { type: 'boolean' }, deleted: { type: 'integer' } } } } } },
+          },
+        },
+      },
+      '/api/history/filters': {
+        get: {
+          tags: ['History'],
+          summary: 'Distinct voices + engines for filter dropdowns',
+          responses: {
+            '200': {
+              description: 'Filter options',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      speakers: { type: 'array', items: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } },
+                      engines: { type: 'array', items: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },

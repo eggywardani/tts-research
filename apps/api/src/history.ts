@@ -15,9 +15,21 @@ export const history = new Hono();
 // `has_audio`, and the client fetches the presigned URL on demand via
 // GET /api/history/:id when the user actually opens a result.
 history.get('/history', async (c) => {
-  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
-  const rows = await db.getHistory(limit);
+  const q = c.req.query.bind(c.req);
+  const rows = await db.getHistory({
+    limit: Number(q('limit') ?? 50) || 50,
+    speaker_id: q('speaker_id') || null,
+    engine: q('engine') || null,
+    search: q('search') || null,
+    from_date: q('from') || null,
+    to_date: q('to') || null,
+  });
   return c.json(rows.map((r) => ({ ...r, url: null, has_audio: Boolean(isS3Enabled() && r.file_path) })));
+});
+
+// Distinct voices + engines present in history, for the filter dropdowns.
+history.get('/history/filters', async (c) => {
+  return c.json(await db.getHistoryFilters());
 });
 
 // GET /api/history/:id — a single record WITH a presigned URL (signed on demand,
