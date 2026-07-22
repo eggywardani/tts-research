@@ -93,12 +93,6 @@ export async function fetchEngines() {
   return res.json();
 }
 
-export async function fetchHealth() {
-  const res = await fetch('/health');
-  if (!res.ok) throw new Error(`health: ${res.status}`);
-  return res.json();
-}
-
 function buildForm(input: SpeakInput): FormData {
   const form = new FormData();
   form.set('text', input.text);

@@ -5,7 +5,7 @@ import { AUTH_COOKIE, isValidToken } from '$lib/server/auth';
 const API_URL = env.API_URL ?? 'http://localhost:9001';
 const API_TOKEN = env.API_TOKEN ?? '';
 
-// Server-side proxy for /api + /health. This is the ONLY path to the backend in
+// Server-side proxy for /api. This is the ONLY path to the backend in
 // production (the Vite proxy in vite.config.ts only exists in `vite dev`). It
 // forwards same-origin browser requests to the API and injects the backend
 // token server-side, so API_TOKEN never reaches browser JS.
@@ -37,14 +37,11 @@ async function proxyToApi(request: Request, pathname: string, search: string): P
 export const handle: Handle = async ({ event, resolve }) => {
   const { pathname, search } = event.url;
   const isApi = pathname === '/api' || pathname.startsWith('/api/');
-  const isHealth = pathname === '/health';
 
   const authed = isValidToken(event.cookies.get(AUTH_COOKIE));
 
-  if (isApi || isHealth) {
-    // /api always requires login; /health stays open so the status banner works
-    // on the login screen.
-    if (isApi && !authed) {
+  if (isApi) {
+    if (!authed) {
       return new Response(JSON.stringify({ error: 'unauthorized' }), {
         status: 401,
         headers: { 'content-type': 'application/json' },

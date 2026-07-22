@@ -1,7 +1,6 @@
 """OmniVoice + RVC TTS service (experiment).
 
 Endpoints:
-  GET  /health        -> service + device status
   GET  /engines       -> engine metadata (for the UI to build controls)
   POST /speak         -> multipart form, returns one audio/wav (chunked+merged)
   POST /speak-stream  -> multipart form, SSE stream of per-chunk audio + progress
@@ -44,19 +43,6 @@ def _startup() -> None:
             "[startup] WARNING: no CUDA GPU detected. OmniVoice needs a GPU; "
             "generation will fail until this runs on a CUDA host."
         )
-
-
-@app.get("/health")
-def health() -> JSONResponse:
-    return JSONResponse(
-        {
-            "status": "ok",
-            "device": DEVICE,
-            "cuda": torch.cuda.is_available(),
-            "engines": engine_manager.available_engines,
-            "rvc_models": rvc_converter.available_models(),
-        }
-    )
 
 
 @app.get("/engines")
@@ -108,7 +94,7 @@ async def _parse_request(
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(await speaker_wav.read())
             tmp_path = tmp.name
-        ref_path = _prep_reference(tmp_path)
+        ref_path = tmp_path
 
     if not ref_path and not instruct:
         raise HTTPException(
@@ -135,42 +121,64 @@ async def _parse_request(
     )
 
 
-# Trailing silence appended to every reference clip. OmniVoice (F5-style) trims
-# the reference portion of its output by duration; if that boundary is slightly
-# off, the clip's LAST WORD leaks into the start of every generated chunk (users
-# hear a stray "for"/"four"). Padding the reference with silence makes the trim
-# land in quiet instead, so nothing bleeds through.
-_REF_TAIL_SILENCE_SEC = 0.35
+# OmniVoice (F5-style) sometimes prepends a short leaked syllable/word from the
+# reference clip to the start of a cloned chunk (users hear a stray "for" before
+# their text). It surfaces as: [short speech burst][pause][the real content].
+# We detect that leading burst-then-pause and drop it. Toggle with STRIP_REF_LEAK.
+_STRIP_LEAK = os.environ.get("STRIP_REF_LEAK", "1").lower() not in ("0", "false", "no", "")
 
 
-def _prep_reference(path: str) -> str:
+def _strip_ref_leak(wav: np.ndarray, sr: int) -> np.ndarray:
     try:
-        wav, sr = sf.read(path, dtype="float32")
-        if wav.ndim > 1:
-            wav = wav.mean(axis=1)
-        # Trim existing trailing near-silence first so the pad is deterministic.
-        thresh = 0.02
-        idx = len(wav)
-        while idx > 0 and abs(wav[idx - 1]) < thresh:
-            idx -= 1
-        wav = wav[:idx]
-        pad = np.zeros(int(sr * _REF_TAIL_SILENCE_SEC), dtype=np.float32)
-        wav = np.concatenate([wav.astype(np.float32), pad])
-        sf.write(path, wav, sr, subtype="PCM_16")
-    except Exception as exc:  # noqa: BLE001 — best-effort; fall back to the raw clip
-        print(f"[ref] could not pad reference ({exc}) — using as-is")
-    return path
+        w = np.asarray(wav, dtype=np.float32).reshape(-1)
+        fr = max(1, int(sr * 0.02))  # 20 ms frames
+        n = len(w) // fr
+        if n < 8:
+            return wav
+        # Framewise RMS energy.
+        sq = w[: n * fr] ** 2
+        e = np.sqrt(np.add.reduceat(sq, np.arange(0, n * fr, fr)) / fr)
+        peak = float(e.max()) or 1e-6
+        thr = peak * 0.12
+        voiced = e >= thr
+
+        # A leak begins at t≈0. If the clip starts with silence, there's no leak.
+        if not voiced[:3].any():
+            return wav
+
+        i = 0
+        while i < n and voiced[i]:
+            i += 1
+        burst_end = i
+        gap_start = i
+        while i < n and not voiced[i]:
+            i += 1
+        gap_end = i
+
+        burst_dur = burst_end * 0.02
+        gap_dur = (gap_end - gap_start) * 0.02
+
+        # Leaked word = a SHORT leading burst, a real pause, then more content.
+        if burst_dur <= 0.55 and 0.08 <= gap_dur <= 0.6 and gap_end < n:
+            return w[gap_end * fr :]
+        return wav
+    except Exception:  # noqa: BLE001 — never fail generation over cleanup
+        return wav
 
 
 def _generate_chunk(req: SpeakRequest, chunk_text: str) -> tuple[np.ndarray, int]:
     eng = engine_manager.get_engine(req.engine)
-    return eng.generate(
+    wav, sr = eng.generate(
         text=chunk_text,
         ref_audio_path=req.ref_path,
         ref_text=req.ref_text,
         instruct=req.instruct,
         params=req.params,
     )
+    # Only cloning (ref-based) can leak the reference; skip for voice design.
+    if req.ref_path and _STRIP_LEAK:
+        wav = _strip_ref_leak(wav, sr)
+    return wav, sr
 
 
 def _maybe_rvc(req: SpeakRequest, wav: np.ndarray, sr: int) -> tuple[np.ndarray, int]:

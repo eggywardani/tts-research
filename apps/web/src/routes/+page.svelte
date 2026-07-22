@@ -2,7 +2,6 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import {
-    fetchHealth,
     fetchSpeakers,
     updateSpeaker,
     createJob,
@@ -42,7 +41,6 @@
 
   let loading = $state(false);
   let error = $state('');
-  let health = $state<any>(null);
 
   // job/queue state
   let jobId = $state<string | null>(null);
@@ -88,11 +86,6 @@
     rvcPitch = lsGet('tts_rvcPitch', rvcPitch);
     restored = true;
 
-    try {
-      health = await fetchHealth();
-    } catch (e) {
-      health = { status: 'unreachable', error: String(e) };
-    }
     await loadSpeakers();
   });
 
@@ -276,16 +269,7 @@
   <!-- LEFT: text + voice source + generate + results -->
   <div class="studio-main">
     <header class="page-head">
-      <div>
-        <p class="sub">TTS engine playground — experiment before wiring into audio-processor-llm</p>
-      </div>
-      {#if health}
-        <div class="health {health?.tts?.status === 'ok' ? 'ok' : 'warn'}">
-          api: ok · tts: {health?.tts?.status ?? '?'}
-          {#if health?.tts?.device}· {health.tts.device}{/if}
-          {#if health?.tts?.cuda === false}· <b>no GPU</b>{/if}
-        </div>
-      {/if}
+      <p class="sub">TTS engine playground — experiment before wiring into audio-processor-llm</p>
     </header>
 
     <section class="card">
@@ -484,9 +468,6 @@
     .action-bar { flex-direction: column; align-items: stretch; }
     .action-bar .go { width: 100%; }
   }
-  .health { display: inline-block; font-size: 0.76rem; padding: 0.2rem 0.6rem; border-radius: 999px; background: #eef1f6; color: #697386; }
-  .health.ok { color: #0f9d58; background: #e7f6ee; }
-  .health.warn { color: #b7791f; background: #fdf4e3; }
   .card { background: #fff; border: 1px solid #e6eaf1; border-radius: 14px; padding: 1.4rem; box-shadow: 0 1px 2px rgba(16,24,40,0.04); }
   .field { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem; }
   .field > span { font-size: 0.82rem; color: #475569; font-weight: 500; }

@@ -40,17 +40,6 @@ app.use('/api/*', async (c, next) => {
   return c.json({ error: 'unauthorized' }, 401);
 });
 
-app.get('/health', async (c) => {
-  let tts: unknown = { status: 'unreachable' };
-  try {
-    const res = await fetch(`${TTS_URL}/health`, { signal: AbortSignal.timeout(3000) });
-    tts = await res.json();
-  } catch (err) {
-    tts = { status: 'unreachable', error: String(err) };
-  }
-  return c.json({ status: 'ok', tts_url: TTS_URL, tts });
-});
-
 // Engine metadata — proxied so the frontend only ever talks to this API.
 app.get('/api/engines', async (c) => {
   try {
