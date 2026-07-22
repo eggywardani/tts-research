@@ -6,6 +6,8 @@ import { speakers } from './speakers.js';
 import { history } from './history.js';
 import { keys } from './keys.js';
 import { validateApiKey } from './db.js';
+import { getOpenApiSpec } from './openapi.js';
+import { sendWebhook } from './webhook.js';
 import {
   createJob,
   listJobs,
@@ -30,6 +32,26 @@ const API_TOKEN = process.env.API_TOKEN ?? '';
 const app = new Hono();
 
 app.use('/*', cors());
+
+// ── API docs (public, no token) ──────────────────────────────────────────────
+// The OpenAPI spec + a Scalar reference UI. Not under /api, so the auth gate
+// below never touches them. Handy for clients holding a per-client token.
+app.get('/openapi.json', (c) => c.json(getOpenApiSpec()));
+
+app.get('/docs', (c) =>
+  c.html(`<!DOCTYPE html>
+<html>
+  <head>
+    <title>OmniVoice + RVC — TTS API Docs</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <script id="api-reference" data-url="/openapi.json"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+  </body>
+</html>`),
+);
 
 // Token-management routes accept ONLY the master token — never a client token,
 // so a client can't mint/revoke tokens. Everything else under /api also accepts
@@ -113,6 +135,7 @@ function toJobRequest(src: Record<string, unknown>): JobRequest {
     use_rvc: String(src.use_rvc ?? '') === 'true' || src.use_rvc === true,
     rvc_model: String(src.rvc_model ?? '') || undefined,
     rvc_pitch: num(src.rvc_pitch),
+    webhook_url: String(src.webhook_url ?? '').trim() || undefined,
   };
 }
 
@@ -174,6 +197,25 @@ app.post('/api/jobs', async (c) => {
 
   const job = await createJob(req);
   wake(); // nudge an idle worker
+  return c.json(await jobView(job), 202);
+});
+
+// Like /api/jobs but requires a webhook_url: the server POSTs status updates
+// (queued → processing → progress → completed/failed) there as the job runs, so
+// callers don't have to poll or hold an SSE connection. Returns 202 immediately.
+app.post('/api/tts/webhook', async (c) => {
+  const req = await parseRequest(c);
+  if (!req) return c.json({ error: 'expected multipart/form-data or JSON' }, 400);
+  const err = validate(req);
+  if (err) return c.json({ error: err }, 400);
+  if (!req.webhook_url || !/^https?:\/\//i.test(req.webhook_url)) {
+    return c.json({ error: 'webhook_url (http/https) is required' }, 400);
+  }
+
+  const job = await createJob(req);
+  wake();
+  // Immediate ack; the worker emits the rest as the job progresses.
+  sendWebhook(req.webhook_url, { event: 'queued', job_id: job.id, status: 'queued' });
   return c.json(await jobView(job), 202);
 });
 

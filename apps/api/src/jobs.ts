@@ -23,6 +23,7 @@ export interface JobRequest {
   use_rvc?: boolean;
   rvc_model?: string;
   rvc_pitch?: number;
+  webhook_url?: string; // when set, job status is POSTed here (see webhook.ts)
 }
 
 export interface Job {

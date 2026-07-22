@@ -154,6 +154,23 @@ can be re-copied. Two tiers:
   the API directly, expose the API port/`:9001` (e.g. a second tunnel hostname
   `api.example.com → api:9001`) — the dashboard + TTS stay private.
 
+### API docs
+
+The API self-documents at **`GET /docs`** (a [Scalar](https://scalar.com) reference
+UI) backed by **`GET /openapi.json`** (a hand-written OpenAPI 3.1 spec in
+`apps/api/src/openapi.ts`). Both are **public** (no token) and served by the API
+service — e.g. `http://your-api-host:9001/docs`. Keep the spec in sync by hand when
+you add or change routes.
+
+### Webhooks
+
+`POST /api/tts/webhook` works like `/api/jobs` but requires a `webhook_url`. The
+server POSTs status updates there as the job runs — `queued → processing →
+progress → completed`/`failed` — instead of you polling or holding an SSE stream.
+Delivery is best-effort: retried (1s/5s/15s, 30s timeout) and ordered per job, with
+no signature, so treat the payload as advisory and re-verify via `GET /api/jobs/{id}`.
+(Any job also accepts `webhook_url` — the dedicated route just enforces it.)
+
 ## Two ways to drive the voice
 
 - **Voice design** — describe attributes: `female, low pitch, british accent`.
