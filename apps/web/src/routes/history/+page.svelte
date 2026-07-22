@@ -73,7 +73,6 @@
           <p class="text">“{trunc(it.text) || '(no text)'}”</p>
           <div class="tags">
             <span class="tag engine">{it.engine}</span>
-            {#if it.rvc}<span class="tag">RVC</span>{/if}
             <span class="tag">{it.speaker_name ? it.speaker_name : 'voice design'}</span>
             {#if it.duration_seconds}<span class="tag">{it.duration_seconds.toFixed(1)}s</span>{/if}
             <span class="tag">{it.chunks?.length ?? 0} chunks</span>

@@ -42,7 +42,7 @@ app.get('/docs', (c) =>
   c.html(`<!DOCTYPE html>
 <html>
   <head>
-    <title>OmniVoice + RVC — TTS API Docs</title>
+    <title>OmniVoice — TTS API Docs</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
   </head>

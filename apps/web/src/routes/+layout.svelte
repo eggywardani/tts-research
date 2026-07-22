@@ -22,7 +22,7 @@
   let sidebarOpen = $state(false);
 </script>
 
-<svelte:head><title>OmniVoice + RVC — TTS dashboard</title></svelte:head>
+<svelte:head><title>OmniVoice — TTS dashboard</title></svelte:head>
 
 {#if bare}
   {@render children()}
@@ -36,7 +36,7 @@
     <aside class="sidebar" class:open={sidebarOpen}>
       <a href="/" class="brand">
         <span class="logo">◆</span>
-        <span class="brand-name">OmniVoice<span class="plus">+</span>RVC</span>
+        <span class="brand-name">OmniVoice</span>
       </a>
 
       <nav class="side-nav">
@@ -117,7 +117,6 @@
   .brand { display: flex; align-items: center; gap: 0.6rem; padding: 0 1.4rem; margin-bottom: 2rem; text-decoration: none; }
   .logo { color: #2563eb; font-size: 1.2rem; }
   .brand-name { font-weight: 700; font-size: 1.05rem; letter-spacing: -0.02em; color: #111827; }
-  .plus { color: #2563eb; margin: 0 1px; }
 
   .side-nav { flex: 1; padding: 0 0.75rem; display: flex; flex-direction: column; gap: 0.2rem; }
   .nav-link {

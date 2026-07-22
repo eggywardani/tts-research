@@ -18,7 +18,7 @@
     }}
   >
     <div class="logo">◆</div>
-    <h1>OmniVoice <span class="plus">+</span> RVC</h1>
+    <h1>OmniVoice</h1>
     <p class="sub">Enter the password to open the dashboard.</p>
 
     <input
@@ -45,7 +45,6 @@
   form { width: 100%; max-width: 360px; background: #fff; border: 1px solid #e6eaf1; border-radius: 16px; padding: 2rem 1.75rem; box-shadow: 0 8px 30px rgba(16,24,40,0.08); text-align: center; }
   .logo { font-size: 1.8rem; color: #2563eb; margin-bottom: 0.4rem; }
   h1 { margin: 0; font-size: 1.35rem; letter-spacing: -0.02em; color: #111827; }
-  .plus { color: #2563eb; }
   .sub { margin: 0.4rem 0 1.25rem; color: #6b7280; font-size: 0.88rem; }
   input {
     width: 100%; box-sizing: border-box; background: #fff; border: 1px solid #d8dee9;

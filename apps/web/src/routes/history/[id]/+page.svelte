@@ -56,7 +56,6 @@
       <p class="text">“{item.text || '(no text)'}”</p>
       <div class="tags">
         <span class="tag engine">{item.engine}</span>
-        {#if item.rvc}<span class="tag">RVC</span>{/if}
         <span class="tag">{item.speaker_name ? item.speaker_name : 'voice design'}</span>
         {#if item.duration_seconds}<span class="tag">{item.duration_seconds.toFixed(1)}s</span>{/if}
         <span class="tag">{item.chunks?.length ?? 0} chunks</span>
@@ -79,8 +78,6 @@
         {#if item.params?.cfg_scale != null}<div class="ci"><span>cfg_scale</span><b>{item.params.cfg_scale}</b></div>{/if}
         {#if item.params?.seed != null}<div class="ci"><span>seed</span><b>{item.params.seed}</b></div>{/if}
         {#if item.sample_rate}<div class="ci"><span>sample rate</span><b>{item.sample_rate} Hz</b></div>{/if}
-        {#if item.params?.rvc_model}<div class="ci"><span>rvc model</span><b>{item.params.rvc_model}</b></div>{/if}
-        {#if item.params?.rvc_pitch}<div class="ci"><span>rvc pitch</span><b>{item.params.rvc_pitch}</b></div>{/if}
       </div>
     </section>
 

@@ -15,7 +15,7 @@ export function getOpenApiSpec() {
   return {
     openapi: '3.1.0',
     info: {
-      title: 'OmniVoice + RVC — TTS API',
+      title: 'OmniVoice — TTS API',
       version: '1.0.0',
       description:
         'Text-to-speech API for the OmniVoice engine with voice cloning, voice design, ' +

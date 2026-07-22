@@ -381,23 +381,6 @@
         <input class="slider" type="range" min="-1" max="100" step="1" value={seed} oninput={(e) => (seed = +e.currentTarget.value)} disabled={settingsDisabled} />
       </div>
 
-      <div class="setting rvc">
-        <label class="toggle"><input type="checkbox" bind:checked={useRvc} disabled={settingsDisabled} /> RVC post-processing</label>
-        <p class="rvc-note">Optional voice-changer: converts the result to a pre-trained RVC model (.pth). Not needed for normal cloning — leave off unless you have a trained model.</p>
-        {#if useRvc}
-          <label class="field rvc-field"><span>rvc model (.pth)</span>
-            <input bind:value={rvcModel} placeholder="my_voice.pth" disabled={settingsDisabled} />
-          </label>
-          <div class="param">
-            <div class="param-head">
-              <span>rvc pitch <em>semitones</em></span>
-              <input class="num" type="number" step="1" min="-12" max="12" bind:value={rvcPitch} disabled={settingsDisabled} />
-            </div>
-            <input class="slider" type="range" min="-12" max="12" step="1" value={rvcPitch} oninput={(e) => (rvcPitch = +e.currentTarget.value)} disabled={settingsDisabled} />
-          </div>
-        {/if}
-      </div>
-
       {#if mode === 'clone' && selectedSpeakerId}
         <div class="preset-actions">
           <button class="reset" onclick={resetPreset} disabled={savingPreset}>Reset</button>
@@ -460,8 +443,6 @@
   .voice-card .ref > span { font-size: 0.8rem; color: #475569; font-weight: 500; }
   .voice-card .ref > span em { font-style: normal; font-weight: 400; color: #9aa1af; font-size: 0.72rem; }
   .settings-hint { margin: 0 0 1rem; font-size: 0.8rem; color: #8a93a6; }
-  .setting { margin-bottom: 1.25rem; }
-  .setting:last-child { margin-bottom: 0; }
 
   .params { display: flex; flex-direction: column; gap: 0.9rem; margin-bottom: 1rem; }
   .param-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.35rem; }
@@ -506,8 +487,6 @@
   .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
   .tabs button { flex: 1; background: #f4f6fb; border: 1px solid #e2e8f0; color: #4f566b; padding: 0.5rem; border-radius: 9px; cursor: pointer; font: inherit; }
   .tabs button.active { background: #2563eb; border-color: #2563eb; color: #fff; }
-  .rvc-field { margin: 0.9rem 0; }
-  .rvc-note { margin: 0.4rem 0 0; font-size: 0.74rem; line-height: 1.4; color: #8a93a6; }
   .preset-actions { display: flex; gap: 0.5rem; margin-top: 1.25rem; }
   .preset-actions .reset { flex: none; background: #fff; border: 1px solid #e2e8f0; color: #475569; border-radius: 9px; padding: 0.5rem 0.9rem; cursor: pointer; font-size: 0.85rem; }
   .preset-actions .reset:hover { background: #f8fafc; }
@@ -515,8 +494,6 @@
   .preset-actions .save-preset:hover { background: #1d4ed8; }
   .preset-actions button:disabled { opacity: 0.6; cursor: default; }
   .preset-hint { margin: 0.55rem 0 0; font-size: 0.72rem; line-height: 1.4; color: #8a93a6; }
-  .toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569; }
-  .toggle input { width: auto; }
   .go { background: #2563eb; border: none; color: white; font-weight: 600; padding: 0.75rem; border-radius: 10px; cursor: pointer; font-size: 1rem; }
   .go:hover { background: #1d4ed8; }
   .go:disabled { opacity: 0.6; cursor: default; }
