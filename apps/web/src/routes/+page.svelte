@@ -17,6 +17,9 @@
   // saved Voice Library (upload/manage voices lives on the /voices page).
   let mode = $state<'clone' | 'design'>('clone');
   let text = $state('Hello, this is a test of the OmniVoice engine. It can speak long passages, split them into chunks, and stream them back as they render.');
+  // Script textarea direction. 'auto' lets the browser detect from the first
+  // strong character (Arabic/Hebrew → RTL). Display-only; not sent to the model.
+  let textDir = $state<'auto' | 'ltr' | 'rtl'>('auto');
   let refText = $state('');
   let instruct = $state('female, low pitch, british accent');
 
@@ -73,6 +76,7 @@
   onMount(async () => {
     // Restore before loading speakers so a saved voice selection is respected.
     text = lsGet('tts_text', text);
+    textDir = lsGet('tts_textDir', textDir);
     mode = lsGet('tts_mode', mode);
     instruct = lsGet('tts_instruct', instruct);
     refText = lsGet('tts_refText', refText);
@@ -91,6 +95,7 @@
 
   // Save each field as it changes (only after the initial restore).
   $effect(() => { if (restored) lsSet('tts_text', text); });
+  $effect(() => { if (restored) lsSet('tts_textDir', textDir); });
   $effect(() => { if (restored) lsSet('tts_mode', mode); });
   $effect(() => { if (restored) lsSet('tts_instruct', instruct); });
   $effect(() => { if (restored) lsSet('tts_refText', refText); });
@@ -274,8 +279,22 @@
 
     <section class="card">
       <label class="field">
-        <span>Text to speak</span>
-        <textarea bind:value={text} rows="6" placeholder="Type what the voice should say…"></textarea>
+        <div class="field-head">
+          <span>Text to speak</span>
+          <div class="dir-toggle" role="radiogroup" aria-label="Text direction">
+            {#each [{ v: 'ltr', label: 'LTR' }, { v: 'auto', label: 'Auto' }, { v: 'rtl', label: 'RTL' }] as opt (opt.v)}
+              <button
+                type="button"
+                class="dir-option"
+                class:active={textDir === opt.v}
+                onclick={() => (textDir = opt.v as 'auto' | 'ltr' | 'rtl')}
+                aria-pressed={textDir === opt.v}
+                title={`Text direction: ${opt.label}`}
+              >{opt.label}</button>
+            {/each}
+          </div>
+        </div>
+        <textarea bind:value={text} dir={textDir} rows="6" placeholder="Type what the voice should say…"></textarea>
       </label>
 
       <div class="tabs">
@@ -471,6 +490,11 @@
   .card { background: #fff; border: 1px solid #e6eaf1; border-radius: 14px; padding: 1.4rem; box-shadow: 0 1px 2px rgba(16,24,40,0.04); }
   .field { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem; }
   .field > span { font-size: 0.82rem; color: #475569; font-weight: 500; }
+  .field-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+  .dir-toggle { display: inline-flex; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px; padding: 2px; }
+  .dir-option { border: none; background: transparent; padding: 0.2rem 0.5rem; font-size: 0.68rem; font-weight: 600; color: #64748b; border-radius: 4px; cursor: pointer; font-family: inherit; letter-spacing: 0.03em; transition: background 0.15s, color 0.15s; }
+  .dir-option:hover:not(.active) { color: #1e293b; }
+  .dir-option.active { background: #ffffff; color: #2563eb; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); }
   textarea, input:not([type]), input[type='number'] {
     background: #fff; border: 1px solid #d8dee9; border-radius: 9px;
     color: #1a1f36; padding: 0.55rem 0.7rem; font: inherit; width: 100%; box-sizing: border-box;
