@@ -292,3 +292,45 @@ export async function clearHistory(): Promise<void> {
   const res = await fetch('/api/history', { method: 'DELETE' });
   if (!res.ok) await fail(res);
 }
+
+// ── API tokens (per-client) ───────────────────────────────────────────────────
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  token: string;
+  disabled: boolean;
+  request_count: number;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+export async function fetchApiKeys(): Promise<ApiKey[]> {
+  const res = await fetch('/api/keys');
+  if (!res.ok) await fail(res);
+  return res.json();
+}
+
+export async function createApiKey(name: string): Promise<ApiKey> {
+  const res = await fetch('/api/keys', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) await fail(res);
+  return res.json();
+}
+
+export async function toggleApiKey(id: string, disabled: boolean): Promise<void> {
+  const res = await fetch(`/api/keys/${id}/toggle`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ disabled }),
+  });
+  if (!res.ok) await fail(res);
+}
+
+export async function deleteApiKey(id: string): Promise<void> {
+  const res = await fetch(`/api/keys/${id}`, { method: 'DELETE' });
+  if (!res.ok) await fail(res);
+}

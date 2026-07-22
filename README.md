@@ -130,6 +130,30 @@ Each app reads its **own** env file — copy the per-app examples:
 root `.env.example` is only for `docker compose` variable substitution.) Both
 gates are **off by default** (blank), so local dev stays frictionless until you opt in.
 
+### Per-client API tokens
+
+For giving **each client its own token** (instead of the single shared `API_TOKEN`),
+the dashboard has an **API Tokens** page (`/tokens`). Create/enable/disable/revoke
+tokens there; each is stored in Postgres (`api_keys` table) and shown in full so it
+can be re-copied. Two tiers:
+
+- **Master token** = `API_TOKEN` → full admin, including token management. The web
+  dashboard uses it via its server-side proxy.
+- **Per-client token** (`tts_…`) → grants **every `/api/*` route except token
+  management** (`/api/keys`). Clients send it directly to the API service as
+  `Authorization: Bearer <token>`, an `x-api-token` header, or `?token=`:
+
+  ```bash
+  curl https://your-api-host:9001/api/speak \
+    -H "Authorization: Bearer tts_xxdirect" \
+    -F text="Hello" -F speaker_id=<uuid>
+  ```
+
+  Usage (`request_count`, `last_used_at`) is tracked per token. Set `API_TOKEN` to
+  enable the gate; blank keeps it open for local dev. To let external clients reach
+  the API directly, expose the API port/`:9001` (e.g. a second tunnel hostname
+  `api.example.com → api:9001`) — the dashboard + TTS stay private.
+
 ## Two ways to drive the voice
 
 - **Voice design** — describe attributes: `female, low pitch, british accent`.

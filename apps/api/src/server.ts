@@ -4,6 +4,8 @@ import { isS3Enabled, presignUrl } from './s3.js';
 import { runMigrations } from './migrate.js';
 import { speakers } from './speakers.js';
 import { history } from './history.js';
+import { keys } from './keys.js';
+import { validateApiKey } from './db.js';
 import {
   createJob,
   listJobs,
@@ -29,14 +31,45 @@ const app = new Hono();
 
 app.use('/*', cors());
 
-// Optional shared-secret gate. When API_TOKEN is set, every /api/* call must
-// carry it in `x-api-token` — this stops someone hitting the backend directly
-// and bypassing the dashboard password. The web app injects the header via its
-// server-side proxy (hooks.server.ts), so the browser never sees the token.
-// No token set = gate off.
+// Token-management routes accept ONLY the master token — never a client token,
+// so a client can't mint/revoke tokens. Everything else under /api also accepts
+// a valid per-client token from the api_keys table.
+const ADMIN_PREFIXES = ['/api/keys'];
+const isAdminPath = (p: string) => ADMIN_PREFIXES.some((base) => p === base || p.startsWith(`${base}/`));
+
+// Read the presented token from x-api-token, `Authorization: Bearer <t>`, or ?token=.
+function extractToken(c: any): string | null {
+  const header = c.req.header('x-api-token');
+  if (header) return header.trim();
+  const auth = c.req.header('authorization');
+  if (auth?.startsWith('Bearer ')) return auth.slice(7).trim();
+  const q = c.req.query('token');
+  return q ? q.trim() : null;
+}
+
+// Two-tier gate:
+//   • master API_TOKEN  → full admin access (dashboard via the web proxy).
+//   • per-client token  → every /api/* route EXCEPT token management.
+// When API_TOKEN is unset the gate stays open (frictionless local dev), matching
+// the previous behaviour.
 app.use('/api/*', async (c, next) => {
-  if (!API_TOKEN) return next();
-  if (c.req.header('x-api-token') === API_TOKEN) return next();
+  const token = extractToken(c);
+  const isMaster = !!API_TOKEN && token === API_TOKEN;
+  if (isMaster) return next();
+
+  // Admin-only routes: require the master token (or open in dev with none set).
+  if (isAdminPath(c.req.path)) {
+    if (!API_TOKEN) return next();
+    return c.json({ error: 'unauthorized' }, 401);
+  }
+
+  // Per-client token grants access to the rest of the API.
+  if (token) {
+    const key = await validateApiKey(token);
+    if (key) return next();
+  }
+
+  if (!API_TOKEN) return next(); // no master token configured → open (dev)
   return c.json({ error: 'unauthorized' }, 401);
 });
 
@@ -53,6 +86,9 @@ app.get('/api/engines', async (c) => {
 // Speaker library + history routers.
 app.route('/api/speakers', speakers);
 app.route('/api', history);
+
+// Per-client API token management (admin-only — see the auth gate above).
+app.route('/api/keys', keys);
 
 // ── Job request parsing ──────────────────────────────────────────────────────
 

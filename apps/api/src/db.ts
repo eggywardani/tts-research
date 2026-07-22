@@ -230,3 +230,89 @@ export async function clearHistory(): Promise<HistoryRecord[]> {
   const rows = (await sql`DELETE FROM history RETURNING *`) as any[];
   return rows.map(normHistory);
 }
+
+// ── API keys (per-client tokens) ─────────────────────────────────────────────
+
+// A per-client access token. Stored plaintext so it can be re-viewed/copied from
+// the dashboard (mirrors cf-agregator). `disabled` gates it without deleting.
+export interface ApiKey {
+  id: string;
+  name: string;
+  token: string;
+  disabled: boolean;
+  request_count: number;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+function normApiKey(r: any): ApiKey {
+  return {
+    id: r.id,
+    name: r.name,
+    token: r.token,
+    disabled: r.disabled,
+    request_count: Number(r.request_count ?? 0), // BIGINT → number (avoids bigint JSON)
+    last_used_at: r.last_used_at ?? null,
+    created_at: r.created_at,
+  };
+}
+
+// "tts_" + 48 hex chars (24 random bytes). Prefix makes tokens greppable/rotatable.
+function generateToken(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `tts_${hex}`;
+}
+
+export async function listApiKeys(): Promise<ApiKey[]> {
+  const rows = (await sql`SELECT * FROM api_keys ORDER BY created_at DESC`) as any[];
+  return rows.map(normApiKey);
+}
+
+export async function createApiKey(name: string): Promise<ApiKey> {
+  const rows = (await sql`
+    INSERT INTO api_keys (id, name, token)
+    VALUES (${crypto.randomUUID()}, ${name}, ${generateToken()})
+    RETURNING *
+  `) as any[];
+  return normApiKey(rows[0]);
+}
+
+export async function setApiKeyDisabled(id: string, disabled: boolean): Promise<boolean> {
+  const rows = (await sql`
+    UPDATE api_keys SET disabled = ${disabled} WHERE id = ${id} RETURNING id
+  `) as any[];
+  return rows.length > 0;
+}
+
+export async function deleteApiKey(id: string): Promise<boolean> {
+  const rows = (await sql`DELETE FROM api_keys WHERE id = ${id} RETURNING id`) as any[];
+  return rows.length > 0;
+}
+
+/**
+ * Validate a presented client token. Returns the key if it exists and is enabled,
+ * else null. On success it records usage (request_count + last_used_at) fire-and-
+ * forget so auth stays fast.
+ */
+export async function validateApiKey(token: string): Promise<ApiKey | null> {
+  const rows = (await sql`
+    SELECT * FROM api_keys WHERE token = ${token} AND disabled = false
+  `) as any[];
+  const key = rows[0] ? normApiKey(rows[0]) : null;
+  if (key) void recordApiKeyUsage(key.id);
+  return key;
+}
+
+async function recordApiKeyUsage(id: string): Promise<void> {
+  try {
+    await sql`
+      UPDATE api_keys
+      SET request_count = request_count + 1, last_used_at = now()
+      WHERE id = ${id}
+    `;
+  } catch {
+    /* usage tracking is best-effort — never fail a request over it */
+  }
+}
