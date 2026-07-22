@@ -29,16 +29,29 @@
   let editing: 'start' | 'end' | null = null;
 
   // Format seconds as "m:ss.s" (e.g. 65.3 → "1:05.3") so it matches how people
-  // remember timestamps.
+  // remember timestamps. This is minutes:seconds — never hours.
   function fmtTime(t: number): string {
     const m = Math.floor(t / 60);
     const s = t - m * 60;
     return `${m}:${s.toFixed(1).padStart(4, '0')}`;
   }
-  // Parse "m:ss(.s)" or a plain seconds value ("24.7"). Returns NaN if unparseable.
+  // Plain-language echo so it's unambiguous that the field is minutes + seconds.
+  function humanTime(t: number): string {
+    const m = Math.floor(t / 60);
+    const s = t - m * 60;
+    return m === 0 ? `${s.toFixed(1)} sec` : `${m} min ${s.toFixed(1)} sec`;
+  }
+  // Parse flexible input: "m:ss(.s)" (8:24), "8m24s"/"8m 24s", or plain seconds
+  // ("504", "24.7"). Returns NaN if unparseable.
   function parseTime(str: string): number {
-    const s = str.trim();
+    const s = str.trim().toLowerCase();
     if (!s) return NaN;
+    // Explicit units, e.g. "8m 24s", "8m", "24s".
+    if (/[ms]/.test(s)) {
+      const u = s.match(/^(?:(\d+(?:\.\d+)?)\s*m)?\s*(?:(\d+(?:\.\d+)?)\s*s)?$/);
+      if (u && (u[1] || u[2])) return parseFloat(u[1] || '0') * 60 + parseFloat(u[2] || '0');
+      return NaN;
+    }
     if (s.includes(':')) {
       const parts = s.split(':');
       if (parts.length !== 2) return NaN;
@@ -148,6 +161,7 @@
         onchange={commitStart}
         onkeydown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
       />
+      <span class="human">= {humanTime(start)}</span>
     </label>
     <label class="field">
       <span>End</span>
@@ -160,9 +174,10 @@
         onchange={commitEnd}
         onkeydown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
       />
+      <span class="human">= {humanTime(end)}</span>
     </label>
-    <span class="hint">m:ss or seconds</span>
   </div>
+  <div class="hint">Format is <b>minutes:seconds</b> — e.g. type <b>8:24</b> for 8 min 24 sec (or just seconds like 504)</div>
 
   <div class="row">
     <button class="play" onclick={togglePlay} type="button">
@@ -186,11 +201,13 @@
   .mask.left { left: 0; }
   .handle { position: absolute; top: 0; bottom: 0; width: 10px; margin-left: -5px; cursor: ew-resize; background: #2563eb; opacity: 0.85; border-radius: 3px; }
   .handle::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 2px; height: 40%; background: #fff; border-radius: 2px; }
-  .fields { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.6rem; }
+  .fields { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem 1.25rem; margin-top: 0.6rem; }
   .field { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: #475569; font-weight: 500; }
   .field input { width: 74px; padding: 0.35rem 0.5rem; border: 1px solid #cddcff; border-radius: 8px; font-size: 0.82rem; color: #1e293b; font-variant-numeric: tabular-nums; }
   .field input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
-  .hint { font-size: 0.72rem; color: #94a3b8; }
+  .human { font-size: 0.76rem; color: #64748b; font-weight: 400; white-space: nowrap; }
+  .hint { font-size: 0.72rem; color: #94a3b8; margin-top: 0.35rem; }
+  .hint b { color: #64748b; font-weight: 600; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.6rem; }
   .play { background: #eef4ff; border: 1px solid #cddcff; color: #2563eb; border-radius: 9px; padding: 0.4rem 0.8rem; cursor: pointer; font-size: 0.82rem; font-weight: 500; }
   .play:hover { background: #e2ecff; }
