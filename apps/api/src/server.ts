@@ -265,15 +265,29 @@ function awaitJob(id: string): Promise<Job> {
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
 
-try {
-  await runMigrations();
-  const recovered = await recoverStaleJobs();
-  if (recovered) console.log(`[api] requeued ${recovered} stale job(s)`);
+// Run DB init with retry (Postgres may not be ready the instant the API starts,
+// especially on Swarm where depends_on:healthy isn't honored), THEN start the
+// worker pool. Previously a boot-time DB hiccup skipped startWorkers() entirely,
+// leaving every job stuck in "queued" with nothing processing them.
+async function boot() {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await runMigrations();
+      const recovered = await recoverStaleJobs();
+      if (recovered) console.log(`[api] requeued ${recovered} stale job(s)`);
+      break;
+    } catch (err) {
+      console.error(`[api] DB init failed (attempt ${attempt}) — retrying in 2s:`, err);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
   startWorkers();
   startJobCleanup(); // prune finished jobs older than 1h, every 5 min
-} catch (err) {
-  console.error('[api] boot failed — is DATABASE_URL reachable?', err);
 }
+
+// Fire-and-forget so the server starts listening immediately; workers come up
+// once the DB is reachable.
+boot();
 
 console.log(`[api] listening on http://localhost:${PORT}  (TTS_URL=${TTS_URL})`);
 
