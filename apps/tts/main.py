@@ -94,7 +94,7 @@ async def _parse_request(
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(await speaker_wav.read())
             tmp_path = tmp.name
-        ref_path = tmp_path
+        ref_path = _prep_reference(tmp_path)
 
     if not ref_path and not instruct:
         raise HTTPException(
@@ -121,11 +121,44 @@ async def _parse_request(
     )
 
 
-# OmniVoice (F5-style) sometimes prepends a short leaked syllable/word from the
-# reference clip to the start of a cloned chunk (users hear a stray "for" before
-# their text). It surfaces as: [short speech burst][pause][the real content].
-# We detect that leading burst-then-pause and drop it. Toggle with STRIP_REF_LEAK.
+# Reference conditioning. With a blank ref_text OmniVoice (F5-style) auto-ASRs the
+# clip and trims the reference portion of its output by duration; if that boundary
+# is slightly off, the clip's LAST WORD leaks into the start of every generated
+# chunk. Giving the reference a clean silent tail makes the trim land in quiet, so
+# nothing bleeds through. Applied to the per-request temp copy only (never a stored
+# clip). Tune/disable with REF_TAIL_SILENCE_SEC (0 disables).
+_REF_TAIL_SILENCE_SEC = float(os.environ.get("REF_TAIL_SILENCE_SEC", "0.35"))
+
+
+def _prep_reference(path: str) -> str:
+    if _REF_TAIL_SILENCE_SEC <= 0:
+        return path
+    try:
+        wav, sr = sf.read(path, dtype="float32")
+        if wav.ndim > 1:
+            wav = wav.mean(axis=1)
+        # Trim existing trailing near-silence first so the pad is deterministic.
+        thresh = 0.02
+        idx = len(wav)
+        while idx > 0 and abs(wav[idx - 1]) < thresh:
+            idx -= 1
+        wav = wav[:idx]
+        pad = np.zeros(int(sr * _REF_TAIL_SILENCE_SEC), dtype=np.float32)
+        wav = np.concatenate([wav.astype(np.float32), pad])
+        sf.write(path, wav, sr, subtype="PCM_16")
+    except Exception as exc:  # noqa: BLE001 — best-effort; fall back to the raw clip
+        print(f"[ref] could not pad reference ({exc}) — using as-is")
+    return path
+
+
+# Backstop for any leak that survives reference conditioning. The leak surfaces as
+# a short leading burst (the stray word) followed by a dip, then the real content —
+# either a true silence gap, or just a soft valley when the leak blends into the
+# text. We detect the first such boundary near t≈0 and drop everything before it.
+# Guarded so it can never remove more than a third of the chunk (protects real
+# speech). Toggle with STRIP_REF_LEAK; set STRIP_REF_LEAK_DEBUG=1 to log decisions.
 _STRIP_LEAK = os.environ.get("STRIP_REF_LEAK", "1").lower() not in ("0", "false", "no", "")
+_STRIP_DEBUG = os.environ.get("STRIP_REF_LEAK_DEBUG", "0").lower() not in ("0", "false", "no", "")
 
 
 def _strip_ref_leak(wav: np.ndarray, sr: int) -> np.ndarray:
@@ -139,28 +172,59 @@ def _strip_ref_leak(wav: np.ndarray, sr: int) -> np.ndarray:
         sq = w[: n * fr] ** 2
         e = np.sqrt(np.add.reduceat(sq, np.arange(0, n * fr, fr)) / fr)
         peak = float(e.max()) or 1e-6
+
+        # A leak begins at t≈0. If the clip opens with silence, there's no leak.
         thr = peak * 0.12
         voiced = e >= thr
-
-        # A leak begins at t≈0. If the clip starts with silence, there's no leak.
         if not voiced[:3].any():
             return wav
 
+        # Never cut past the first ~0.9s, nor more than a third of the chunk — that
+        # keeps the real content safe no matter what the energy contour looks like.
+        max_cut = min(int(0.9 / 0.02), n // 3)
+        if max_cut < 3:
+            return wav
+
+        # Leading burst (suspected leaked word), then the dip after it.
         i = 0
         while i < n and voiced[i]:
             i += 1
         burst_end = i
-        gap_start = i
         while i < n and not voiced[i]:
             i += 1
         gap_end = i
-
         burst_dur = burst_end * 0.02
-        gap_dur = (gap_end - gap_start) * 0.02
+        gap_dur = (gap_end - burst_end) * 0.02
 
-        # Leaked word = a SHORT leading burst, a real pause, then more content.
-        if burst_dur <= 0.55 and 0.08 <= gap_dur <= 0.6 and gap_end < n:
-            return w[gap_end * fr :]
+        cut = 0
+        reason = ""
+        # Case A: clean [short burst][true silence gap][content] — the reliable one.
+        if burst_end <= max_cut and burst_dur <= 0.7 and 0.06 <= gap_dur <= 0.6 and gap_end < n:
+            cut, reason = gap_end, f"gap burst={burst_dur:.2f}s gap={gap_dur:.2f}s"
+        else:
+            # Case B: the leak blends into the text with only a soft dip (energy
+            # never fell to true silence). Take the deepest valley in the window,
+            # but only cut if the dip is pronounced and flanked by a real burst and
+            # real content — otherwise we risk clipping the first genuine word.
+            win = min(max_cut, n - 1)
+            if win >= 5:
+                v = int(np.argmin(e[1:win]) + 1)
+                valley = e[v]
+                left_peak = float(e[:v].max())
+                right_peak = float(e[v + 1 : win + 1].max())
+                if (
+                    5 <= v <= max_cut  # leaked-word-sized burst precedes (>=0.1s)
+                    and valley <= 0.30 * left_peak
+                    and valley <= 0.45 * right_peak
+                    and left_peak >= 0.30 * peak
+                    and right_peak >= 0.30 * peak
+                ):
+                    cut, reason = v, f"dip v={v*0.02:.2f}s valley={valley/peak:.2f}peak"
+
+        if cut > 0:
+            if _STRIP_DEBUG:
+                print(f"[leak] stripped {cut * 0.02:.2f}s ({reason})")
+            return w[cut * fr :]
         return wav
     except Exception:  # noqa: BLE001 — never fail generation over cleanup
         return wav

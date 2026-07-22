@@ -4,6 +4,7 @@ uvicorn>=0.30.0
 python-multipart>=0.0.9
 soundfile>=0.12.0
 numpy
+regex>=2024.0.0  # Unicode property classes (\p{Lu}, \p{Lo}) for sentence splitting
 
 # OmniVoice engine (needs a CUDA GPU + torch)
 # torch + torchaudio are installed separately for your CUDA version (see Dockerfile).
