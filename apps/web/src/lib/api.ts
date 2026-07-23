@@ -37,6 +37,8 @@ export interface Speaker {
   engines: Record<string, { preset?: VoicePreset; ref_text?: string }>;
   voice_preset: VoicePreset;
   audio_url: string | null;
+  api_enabled?: boolean;
+  is_default?: boolean;
   created_at: string;
 }
 
@@ -253,7 +255,7 @@ export async function createSpeaker(data: {
   return res.json();
 }
 
-export async function updateSpeaker(id: string, updates: Partial<Pick<Speaker, 'name' | 'language' | 'voice_preset' | 'engines' | 'default_engine'>>): Promise<Speaker> {
+export async function updateSpeaker(id: string, updates: Partial<Pick<Speaker, 'name' | 'language' | 'voice_preset' | 'engines' | 'default_engine' | 'api_enabled'>>): Promise<Speaker> {
   const res = await fetch(`/api/speakers/${id}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
