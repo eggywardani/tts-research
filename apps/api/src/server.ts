@@ -36,7 +36,11 @@ app.use('/*', cors());
 // ── API docs (public, no token) ──────────────────────────────────────────────
 // The OpenAPI spec + a Scalar reference UI. Not under /api, so the auth gate
 // below never touches them. Handy for clients holding a per-client token.
-app.get('/openapi.json', (c) => c.json(getOpenApiSpec()));
+// PUBLIC_API_URL is the API's public base URL (e.g. https://api-tts-research…).
+// It makes the docs' examples + "Try it" target the API host directly instead of
+// whatever origin /docs was opened from. Unset → same-origin ('/') for local dev.
+const PUBLIC_API_URL = process.env.PUBLIC_API_URL ?? '';
+app.get('/openapi.json', (c) => c.json(getOpenApiSpec(PUBLIC_API_URL || '/')));
 
 app.get('/docs', (c) =>
   c.html(`<!DOCTYPE html>

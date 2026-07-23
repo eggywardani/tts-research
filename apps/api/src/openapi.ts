@@ -11,7 +11,12 @@ const bearerAuth = [{ BearerAuth: [] }, { ApiKeyHeader: [] }, { ApiKeyQuery: [] 
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
 
-export function getOpenApiSpec() {
+// `serverUrl` is the public base URL clients should call (e.g.
+// https://api-tts-research.bounceback.work). Defaults to '/' (same origin) for
+// local dev. Set PUBLIC_API_URL so the docs' examples + "Try it" hit the API
+// host directly with a Bearer token, not the dashboard's web host.
+export function getOpenApiSpec(serverUrl = '/') {
+  const url = serverUrl === '/' ? '/' : serverUrl.replace(/\/+$/, '');
   return {
     openapi: '3.1.0',
     info: {
@@ -24,7 +29,7 @@ export function getOpenApiSpec() {
         'header, or `?token=<token>`. Per-client tokens reach every route except token ' +
         'management (`/api/keys`), which needs the master token.',
     },
-    servers: [{ url: '/', description: 'This API service' }],
+    servers: [{ url, description: url === '/' ? 'Same origin' : 'Public API' }],
     security: bearerAuth,
     tags: [
       { name: 'TTS', description: 'Generate speech' },
